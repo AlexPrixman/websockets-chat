@@ -16,7 +16,7 @@ This is a portfolio demo, not a replacement for a production messaging platform.
 
 ## Development
 
-Use Node 24 and PostgreSQL 18. Run `npm ci`, copy `.env.example` to `.env`, and configure your own Neon authentication and private bucket credentials. Set `VITE_NEON_AUTH_URL` to the same auth URL as `NEON_AUTH_BASE_URL`. Register your application origin in Neon Auth's trusted domains. Then run `npm run dev` and open http://localhost:5173.
+Use Node 24 and PostgreSQL 18. Run `npm ci`, copy `.env.example` to `.env`, and configure your own Neon authentication and private bucket credentials. Register your application origin in Neon Auth's trusted domains. The app proxies supported authentication routes through `/api/auth`, so browser sessions use first-party cookies. Then run `npm run dev` and open http://localhost:5173.
 
 The server applies the version-controlled, additive schema in `server/schema.js` at startup. Never point test tools at the live database. Back up your database before future schema changes.
 
@@ -39,7 +39,7 @@ When PostgreSQL cannot run locally, `USE_PGLITE=1 npm test` and `USE_PGLITE=1 np
 
 Deploy the `master` branch as a **free Node web service** on Render. Build: `npm ci --include=dev && npm run build`. Start: `npm start`. Set `NODE_ENV=production`, `NODE_VERSION=24`, and the variables in `.env.example`. Set `PUBLIC_APP_URL` to the actual HTTPS service origin, with no trailing slash. Use Neon for PostgreSQL and the private `chat-photos` bucket so records and images survive Render restarts. Set the health-check path to `/api/health`.
 
-Only `VITE_NEON_AUTH_URL` is public frontend configuration. Database and storage secrets stay server-side. Restrict storage credentials to read/write storage scopes. Never commit `.env` files. Production startup rejects missing database, auth, HTTPS or storage configuration.
+Database and storage secrets stay server-side. Restrict storage credentials to read/write storage scopes. Never commit `.env` files. Production startup rejects missing database, auth, HTTPS or storage configuration. The browser uses the same-origin auth proxy; no build-time credentials are needed.
 
 Use one application instance: Socket.IO presence and delivery currently run in memory. Multiple instances require a shared Socket.IO adapter and distributed event/rate-limit coordination. PostgreSQL transactions serialize critical message/photo operations. Photo limits are 25 MB per user/day and 200 MB total; failed/abandoned uploads require operator cleanup. The conversation list currently shows the 50 most recently active conversations.
 

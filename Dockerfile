@@ -3,8 +3,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-ARG VITE_NEON_AUTH_URL
-ENV VITE_NEON_AUTH_URL=$VITE_NEON_AUTH_URL
 RUN npm run build && npm prune --omit=dev
 FROM node:24-bookworm-slim
 WORKDIR /app

@@ -427,7 +427,8 @@ function ChatApp({
       photoId?: string;
     } | null>(null),
     bottom = useRef<HTMLDivElement>(null),
-    typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
+    lastTypingSent = useRef(0);
   const current = conversations.find((c) => c.id === selected);
   const refresh = async () => {
     setConversations(await api<Conversation[]>("/conversations"));
@@ -486,7 +487,10 @@ function ChatApp({
       setConnected(true);
       setError("");
       void refresh().catch((e) => setError(errorText(e)));
-      if (selectedRef.current) void load(selectedRef.current);
+      if (selectedRef.current) {
+        setMessages([]);
+        void load(selectedRef.current);
+      }
     });
     s.on("disconnect", () => setConnected(false));
     s.on("connect_error", () => {
@@ -551,14 +555,20 @@ function ChatApp({
   }, []);
   const lastId = messages.at(-1)?.id;
   useEffect(() => {
-    if (!selected || !lastId || document.visibilityState === "hidden") return;
-    void api(
-      `/conversations/${selected}/read`,
-      json("POST", { lastReadId: lastId }),
-    )
-      .then(refresh)
-      .catch(() => {});
+    if (!selected || !lastId) return;
+    const markRead = () => {
+      if (document.visibilityState === "hidden") return;
+      void api(
+        `/conversations/${selected}/read`,
+        json("POST", { lastReadId: lastId }),
+      )
+        .then(refresh)
+        .catch(() => {});
+    };
+    markRead();
+    document.addEventListener("visibilitychange", markRead);
     bottom.current?.scrollIntoView({ behavior: "smooth" });
+    return () => document.removeEventListener("visibilitychange", markRead);
   }, [selected, lastId]);
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -899,10 +909,16 @@ function ChatApp({
                   value={draft}
                   onChange={(e) => {
                     setDraft(e.target.value);
-                    socket.current?.emit("typing", {
-                      conversationId: selected,
-                      active: !!e.target.value,
-                    });
+                    if (
+                      !e.target.value ||
+                      Date.now() - lastTypingSent.current > 1000
+                    ) {
+                      lastTypingSent.current = Date.now();
+                      socket.current?.emit("typing", {
+                        conversationId: selected,
+                        active: !!e.target.value,
+                      });
+                    }
                   }}
                   onKeyDown={(e) => {
                     if (

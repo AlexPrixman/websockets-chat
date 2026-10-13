@@ -75,7 +75,9 @@ test("two people exchange live messages and photos, history survives reload", as
         .getByLabel("Messages", { exact: true })
         .getByText(text, { exact: true }),
     ).toBeVisible();
-    const priorPhotos = await bob.getByRole("img", {name:"Shared photo"}).count();
+    const priorPhotos = await bob
+      .getByRole("img", { name: "Shared photo" })
+      .count();
     await page.getByLabel("Attach photo").setInputFiles({
       name: "tiny.png",
       mimeType: "image/png",
@@ -88,7 +90,9 @@ test("two people exchange live messages and photos, history survives reload", as
     await page
       .getByRole("button", { name: "Send message", exact: true })
       .click();
-    await expect(bob.getByRole("img", {name:"Shared photo"})).toHaveCount(priorPhotos+1);
+    await expect(bob.getByRole("img", { name: "Shared photo" })).toHaveCount(
+      priorPhotos + 1,
+    );
     await expect(
       bob.getByRole("img", { name: "Shared photo" }).last(),
     ).toBeVisible();
@@ -99,7 +103,23 @@ test("two people exchange live messages and photos, history survives reload", as
         .getByLabel("Messages", { exact: true })
         .getByText(text, { exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole("img", {name:"Shared photo"})).toHaveCount(priorPhotos+1);
+    await expect(page.getByRole("img", { name: "Shared photo" })).toHaveCount(
+      priorPhotos + 1,
+    );
+    await page.context().setOffline(true);
+    const missed = "While you were away " + Date.now();
+    await bob
+      .getByRole("textbox", { name: "Message", exact: true })
+      .fill(missed);
+    await bob
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+    await page.context().setOffline(false);
+    await expect(
+      page
+        .getByLabel("Messages", { exact: true })
+        .getByText(missed, { exact: true }),
+    ).toBeVisible();
     await expect(page.locator("body")).toHaveJSProperty(
       "scrollWidth",
       await page.evaluate(() => innerWidth),

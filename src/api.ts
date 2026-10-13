@@ -1,7 +1,5 @@
 import { createAuthClient } from "@neondatabase/auth";
-export const auth = createAuthClient(
-  import.meta.env.VITE_NEON_AUTH_URL || `${location.origin}/test-auth`,
-);
+export const auth = createAuthClient(`${location.origin}/api/auth`);
 export async function token() {
   const { data, error } = await auth.token();
   // Neon may satisfy /token from its session cache. The wrapper injects

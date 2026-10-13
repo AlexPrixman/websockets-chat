@@ -7,6 +7,7 @@ import { Server } from "socket.io";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { authentication, managedVerifier } from "./auth.js";
+import { authProxy } from "./auth-proxy.js";
 import { Chat, profile } from "./chat.js";
 import { Photos, storage } from "./storage.js";
 import { fail, HttpError, text, uuid } from "./validation.js";
@@ -73,7 +74,6 @@ export function createApp(
     }
     next();
   });
-  if (authTestRouter) app.use("/test-auth", authTestRouter);
   app.get("/api/health", async (req, res) => {
     await db.query("SELECT 1");
     res.json({ status: "ok" });
@@ -95,6 +95,7 @@ export function createApp(
       message: { error: "Too many requests. Please wait a moment" },
     }),
   );
+  app.use("/api/auth", authTestRouter || authProxy(config));
   app.use("/api", auth.middleware);
   app.get("/api/me", (req, res) =>
     res.json({ ...profile(req.actor), moderator: req.actor.moderator }),
