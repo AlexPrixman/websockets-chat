@@ -233,3 +233,56 @@ test("real-time delivery, typing, nonmember isolation and logout revocation", as
     sockets.forEach((s) => s.disconnect());
   }
 });
+test("logout revokes earlier tokens and sockets while permitting fresh sign-in", { timeout: 10000 }, async () => {
+  const previous = {
+    ...f.tokens.get("bob"),
+    iat: Math.floor(Date.now() / 1000) - 5,
+  };
+  f.tokens.set("bob-earlier", previous);
+  f.tokens.set("bob-unseen", { ...previous, iat: previous.iat - 30 });
+  const s = io("http://127.0.0.1:" + f.server.address().port, {
+    auth: { token: "bob-earlier" },
+    transports: ["websocket"],
+    autoConnect: false,
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      s.once("connect", resolve);
+      s.once("connect_error", reject);
+      s.connect();
+    });
+    const disconnected = new Promise((resolve) =>
+      s.once("disconnect", resolve),
+    );
+    await as("post", "/logout", "bob").send({}).expect(204);
+    await disconnected;
+    await as("get", "/me", "bob-earlier").expect(401);
+    await as("get", "/me", "bob-unseen").expect(401);
+    // The cutoff remains sufficient after individual token hashes expire.
+    await f.db.query("DELETE FROM revoked_tokens");
+    await as("get", "/me", "bob").expect(401);
+    await as("get", "/me", "eve").expect(200);
+    f.tokens.set("bob-fresh", {
+      ...previous,
+      iat: Math.floor(Date.now() / 1000),
+    });
+    await as("get", "/me", "bob-fresh").expect(200);
+    const denied = new Promise((resolve) => s.once("connect_error", resolve));
+    s.connect();
+    assert.match((await denied).message, /signed out/);
+  } finally {
+    s.disconnect();
+  }
+});
+test("access tokens require a valid issuance timestamp", async () => {
+  for (const iat of [
+    undefined,
+    "123",
+    0,
+    1.5,
+    Math.floor(Date.now() / 1000) + 60,
+  ]) {
+    f.tokens.set("bad-time", { ...f.tokens.get("eve"), iat });
+    await as("get", "/me", "bad-time").expect(401);
+  }
+});

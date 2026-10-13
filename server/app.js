@@ -106,10 +106,11 @@ export function createApp(
     res.json(p);
   });
   app.post("/api/logout", async (req, res) => {
-    await auth.revoke(req.actor);
+    const issuedThrough = await auth.revoke(req.actor);
     for (const socket of await io.in("user:" + req.actor.id).fetchSockets())
-      if (socket.data.actor.tokenHash === req.actor.tokenHash)
+      if (socket.data.actor.issuedAt <= issuedThrough)
         socket.disconnect(true);
+    await auth.finishLogout(issuedThrough);
     res.status(204).end();
   });
   app.get("/api/people", async (req, res) =>

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { fail } from "./validation.js";
 export const tokenHash = (token) =>
@@ -30,6 +31,9 @@ export function authentication(db, config, verify = managedVerifier(config)) {
     if (
       typeof claims.sub !== "string" ||
       claims.sub.length > 200 ||
+      !Number.isSafeInteger(claims.iat) ||
+      claims.iat <= 0 ||
+      claims.iat > Math.floor(Date.now() / 1000) + 30 ||
       !claims.exp ||
       claims.exp * 1000 <= Date.now()
     )
@@ -40,6 +44,12 @@ export function authentication(db, config, verify = managedVerifier(config)) {
         [tokenHash(token)],
       )
     )
+      fail(401, "This session has signed out");
+    const revocation = await db.one(
+      "SELECT issued_through FROM account_revocations WHERE user_id=$1",
+      [claims.sub],
+    );
+    if (revocation && claims.iat <= Number(revocation.issued_through))
       fail(401, "This session has signed out");
     const name =
       typeof claims.name === "string" ? claims.name.slice(0, 80) : "New member";
@@ -56,6 +66,7 @@ export function authentication(db, config, verify = managedVerifier(config)) {
       ])),
       moderator: claims.sub === config.moderatorId,
       expires: claims.exp,
+      issuedAt: claims.iat,
       tokenHash: tokenHash(token),
     };
   }
@@ -66,13 +77,28 @@ export function authentication(db, config, verify = managedVerifier(config)) {
     next();
   };
   async function revoke(user) {
+    // Managed JWTs do not carry a session ID. A persistent account cutoff
+    // covers rotated and previously unseen tokens, including other tabs.
+    const issuedThrough = Math.max(
+      Math.floor(Date.now() / 1000),
+      user.issuedAt,
+    );
     await db.transaction(async () => {
       await db.query("DELETE FROM revoked_tokens WHERE expires_at<=now()");
       await db.query(
         "INSERT INTO revoked_tokens(hash,expires_at) VALUES ($1,to_timestamp($2)) ON CONFLICT DO NOTHING",
         [user.tokenHash, user.expires],
       );
+      await db.query(
+        "INSERT INTO account_revocations(user_id,issued_through) VALUES ($1,$2) ON CONFLICT(user_id) DO UPDATE SET issued_through=GREATEST(account_revocations.issued_through,EXCLUDED.issued_through)",
+        [user.id, issuedThrough],
+      );
     });
+    return issuedThrough;
   }
-  return { actor, middleware, revoke };
+  // JWT issue times have second precision. Finish logout after its cutoff
+  // second so an immediate fresh sign-in is not accidentally rejected.
+  const finishLogout = (issuedThrough) =>
+    delay(Math.max(0, (issuedThrough + 1) * 1000 - Date.now()));
+  return { actor, middleware, revoke, finishLogout };
 }

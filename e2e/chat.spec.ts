@@ -15,9 +15,8 @@ test("sign-up, profile update, session restoration and logout", async ({
     .getByRole("button", { name: "New here? Create an account" })
     .click();
   await page.getByLabel("Your name").fill("New Friend");
-  await page
-    .getByLabel("Email address")
-    .fill(`friend-${Date.now()}@example.test`);
+  const user = `friend-${Date.now()}`;
+  await page.getByLabel("Email address").fill(`${user}@example.test`);
   await page.getByLabel("Password", { exact: true }).fill("TestPassword123!");
   await page
     .getByRole("button", { name: "Create account", exact: true })
@@ -28,12 +27,20 @@ test("sign-up, profile update, session restoration and logout", async ({
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByRole("status")).toHaveText("Profile saved");
   await page.getByRole("button", { name: "Close dialog" }).click();
+  const { token: earlierToken } = await (
+    await page.request.get("/api/auth/token")
+  ).json();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Messages." })).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(
     page.getByRole("heading", { name: "Welcome back." }),
   ).toBeVisible();
+  const revoked = await page.request.get("/api/me", {
+    headers: { Authorization: "Bearer " + earlierToken },
+  });
+  expect(revoked.status()).toBe(401);
+  await login(page, user);
 });
 test("two people exchange live messages and photos, history survives reload", async ({
   page,
