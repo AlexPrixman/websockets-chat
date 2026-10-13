@@ -34,15 +34,17 @@ export async function testDatabase() {
 export async function fixture() {
   const db = await testDatabase();
   const objects = new Map();
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const tokens = new Map(
+    ["alice", "bob", "eve", "moderator"].map((user) => [
+      user,
+      { sub: user, name: user, iat: issuedAt, exp: issuedAt + 3600 },
+    ]),
+  );
   const runtime = createApp(db, config, {
     verifyToken: async (token) => {
-      if (!["alice", "bob", "eve", "moderator"].includes(token))
-        throw new Error("Invalid");
-      return {
-        sub: token,
-        name: token,
-        exp: Math.floor(Date.now() / 1000) + 3600,
-      };
+      if (!tokens.has(token)) throw new Error("Invalid");
+      return tokens.get(token);
     },
     files: {
       put: async (k, b) => objects.set(k, b),
@@ -53,6 +55,7 @@ export async function fixture() {
     ...runtime,
     db,
     objects,
+    tokens,
     dispose: async () => {
       await runtime.close();
       await db.close();

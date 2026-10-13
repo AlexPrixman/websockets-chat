@@ -8,6 +8,7 @@ if (process.env.NODE_ENV === "production")
 const db = await testDatabase();
 const sessions = new Map(),
   users = new Map(),
+  tokens = new Map(),
   photos = new Map();
 for (const [id, name] of [
   ["alice", "Alice"],
@@ -23,27 +24,38 @@ for (const [id, name] of [
 const router = express.Router();
 const session = (req) =>
   sessions.get(req.headers.cookie?.match(/circle_test=([^;]+)/)?.[1]);
-const data = (u) =>
-  u
+const issue = (user) => {
+  const token = randomUUID();
+  const iat = Math.floor(Date.now() / 1000);
+  tokens.set(token, { sub: user.id, name: user.name, iat, exp: iat + 3600 });
+  return { user, token };
+};
+const data = (s) =>
+  s
     ? {
-        user: { id: u.id, name: u.name, email: u.email },
+        user: { id: s.user.id, name: s.user.name, email: s.user.email },
         session: {
-          id: u.id,
-          token: u.id,
+          id: s.user.id,
+          token: s.token,
           expiresAt: new Date(Date.now() + 3600000).toISOString(),
         },
       }
     : null;
-router.get("/get-session", (req, res) => res.json(data(session(req))));
+router.get("/get-session", (req, res) => {
+  const s = session(req);
+  if (s) s.token = issue(s.user).token;
+  res.json(data(s));
+});
 router.post("/sign-in/email", (req, res) => {
   const u = users.get(req.body.email);
   if (!u || u.password !== req.body.password)
     return res.status(401).json({ message: "Invalid email or password" });
   const key = randomUUID();
-  sessions.set(key, u);
+  const s = issue(u);
+  sessions.set(key, s);
   res
     .cookie("circle_test", key, { httpOnly: true, sameSite: "lax" })
-    .json({ ...data(u), token: key });
+    .json({ ...data(s), token: key });
 });
 router.post("/sign-up/email", (req, res) => {
   if (users.has(req.body.email))
@@ -51,15 +63,17 @@ router.post("/sign-up/email", (req, res) => {
   const u = { id: randomUUID(), ...req.body };
   users.set(u.email, u);
   const key = randomUUID();
-  sessions.set(key, u);
+  const s = issue(u);
+  sessions.set(key, s);
   res
     .cookie("circle_test", key, { httpOnly: true, sameSite: "lax" })
-    .json({ ...data(u), token: key });
+    .json({ ...data(s), token: key });
 });
 router.get("/token", (req, res) => {
-  const u = session(req);
-  if (!u) return res.status(401).json({ message: "Unauthorized" });
-  res.json({ token: u.id });
+  const s = session(req);
+  if (!s) return res.status(401).json({ message: "Unauthorized" });
+  s.token = issue(s.user).token;
+  res.json({ token: s.token });
 });
 router.post("/sign-out", (req, res) => {
   sessions.delete(req.headers.cookie?.match(/circle_test=([^;]+)/)?.[1]);
@@ -76,13 +90,8 @@ const runtime = createApp(
   {
     authTestRouter: router,
     verifyToken: async (token) => {
-      const u = [...users.values()].find((u) => u.id === token);
-      if (!u) throw new Error("Invalid token");
-      return {
-        sub: u.id,
-        name: u.name,
-        exp: Math.floor(Date.now() / 1000) + 3600,
-      };
+      if (!tokens.has(token)) throw new Error("Invalid token");
+      return tokens.get(token);
     },
     files: {
       put: async (k, b) => photos.set(k, b),
@@ -90,7 +99,7 @@ const runtime = createApp(
     },
   },
 );
-for (const u of users.values()) await runtime.auth.actor(u.id);
+for (const u of users.values()) await runtime.auth.actor(issue(u).token);
 runtime.server.listen(4173, "127.0.0.1", () =>
   console.log("Test server ready"),
 );

@@ -9,4 +9,5 @@ CREATE INDEX IF NOT EXISTS messages_history ON messages(conversation_id,id DESC)
 CREATE TABLE IF NOT EXISTS blocks(blocker_id TEXT NOT NULL REFERENCES profiles(id),blocked_id TEXT NOT NULL REFERENCES profiles(id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(blocker_id,blocked_id),CHECK(blocker_id<>blocked_id));
 CREATE TABLE IF NOT EXISTS reports(id UUID PRIMARY KEY,reporter_id TEXT NOT NULL REFERENCES profiles(id),message_id BIGINT NOT NULL REFERENCES messages(id),reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(reporter_id,message_id));
 CREATE TABLE IF NOT EXISTS revoked_tokens(hash TEXT PRIMARY KEY,expires_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS account_revocations(user_id TEXT PRIMARY KEY REFERENCES profiles(id),issued_through BIGINT NOT NULL);
 `;

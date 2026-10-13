@@ -2,6 +2,8 @@
 
 A responsive, real-time messenger built with React, TypeScript, Express, Socket.IO, PostgreSQL, Neon Auth, and private S3-compatible photo storage.
 
+[Open the live app](https://circlechat-alexprixman.onrender.com)
+
 ## What works
 
 - Email/password accounts, session restoration, email verification and password recovery screens.
@@ -41,6 +43,8 @@ Deploy the `master` branch as a **free Node web service** on Render. Build: `npm
 
 Database and storage secrets stay server-side. Restrict storage credentials to read/write storage scopes. Never commit `.env` files. Production startup rejects missing database, auth, HTTPS or storage configuration. The browser uses the same-origin auth proxy; no build-time credentials are needed.
 
+Signing out invalidates all previously issued access tokens for that account and disconnects their sockets. Other signed-in browsers may need to reload to obtain a fresh token. The revocation cutoff is stored in PostgreSQL and survives server restarts. A new sign-in remains available after logout.
+
 Use one application instance: Socket.IO presence and delivery currently run in memory. Multiple instances require a shared Socket.IO adapter and distributed event/rate-limit coordination. PostgreSQL transactions serialize critical message/photo operations. Photo limits are 25 MB per user/day and 200 MB total; failed/abandoned uploads require operator cleanup. The conversation list currently shows the 50 most recently active conversations.
 
 Free hosting can sleep when idle. Email delivery uses the provider's configured SMTP; a commercial rollout needs its production email setup, monitoring, backups, abuse controls and a retention policy.
@@ -65,6 +69,6 @@ Authenticated routes require a signed Neon JWT in `Authorization: Bearer ...`. S
 | PUT / DELETE | `/api/blocks/:id` | Block/unblock |
 | POST | `/api/reports` | Report a conversation message |
 | GET / PATCH | `/api/reports`, `/api/reports/:id` | Moderator review |
-| POST | `/api/logout` | Revoke current JWT and disconnect its sockets |
+| POST | `/api/logout` | Revoke previously issued account JWTs and disconnect their sockets |
 
 Socket events: `message:send` (acknowledged, idempotent), `message:new`, `message:updated`, `message:read`, `typing`, `presence:changed`, `conversations:changed`, `profile:updated`, `auth:expired`. Reconnecting clients refetch persisted history; sockets are not the source of truth.
