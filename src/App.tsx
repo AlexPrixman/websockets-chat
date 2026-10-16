@@ -922,7 +922,7 @@ function ChatApp({
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
-                    disabled={busy || current.blocked}
+                    disabled={busy || current.blocked || voice.recording}
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       if (f && f.size > 5 * 1024 * 1024)

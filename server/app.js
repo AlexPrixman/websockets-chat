@@ -91,18 +91,16 @@ export function createApp(
       moderationEnabled: !!config.moderatorId,
     }),
   );
-  app.use(
-    "/api",
-    rateLimit({
-      windowMs: 60000,
-      limit: 240,
-      standardHeaders: "draft-8",
-      legacyHeaders: false,
-      message: { error: "Too many requests. Please wait a moment" },
-    }),
-  );
-  app.use("/api/auth", authTestRouter || authProxy(config));
+  app.use("/api/auth", rateLimit({
+    windowMs: 60000, limit: 240, standardHeaders: "draft-8", legacyHeaders: false,
+    message: { error: "Too many requests. Please wait a moment" },
+  }), authTestRouter || authProxy(config));
   app.use("/api", auth.middleware);
+  app.use("/api", rateLimit({
+    windowMs: 60000, limit: 240, standardHeaders: "draft-8", legacyHeaders: false,
+    keyGenerator: (req) => req.actor.id,
+    message: { error: "Too many requests. Please wait a moment" },
+  }));
   app.get("/api/me", (req, res) =>
     res.json({ ...profile(req.actor), moderator: req.actor.moderator }),
   );
@@ -276,7 +274,7 @@ export function createApp(
         .status(409)
         .json({ error: "That handle or attachment is already in use" });
     if (e instanceof multer.MulterError)
-      return res.status(400).json({ error: "Choose one photo up to 5 MB" });
+      return res.status(400).json({ error: "Choose one attachment up to 5 MB" });
     if (e.type === "entity.parse.failed")
       return res.status(400).json({ error: "Invalid JSON" });
     if (e.type === "entity.too.large")

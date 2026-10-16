@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
 import { api } from "./api";
-import type { Conversation, Person } from "./types";
+import { titleOf, type Conversation, type Person } from "./types";
 
 type CallState = {
   conversationId: string;
@@ -43,6 +43,7 @@ export function useVoiceCalls(socket: Socket | null, selected: string, onError: 
   const [status, setStatus] = useState("");
   const runtime = useRef<Runtime | null>(null);
   const entering = useRef(false);
+  const bufferedSignals = useRef<Signal[]>([]);
   const currentSocket = useRef(socket);
   const selectedRef = useRef(selected);
   currentSocket.current = socket;
@@ -144,6 +145,9 @@ export function useVoiceCalls(socket: Socket | null, selected: string, onError: 
         peers: new Map(), queued: new Map(),
       };
       runtime.current = call;
+      for (const event of bufferedSignals.current.filter((event) => event.callId === joined))
+        await receive(event);
+      bufferedSignals.current = [];
       setSession({ callId: joined, conversationId, participants: call.participants });
       setIncoming(null);
       setStatus(callId ? "Joining call…" : "Ringing your people…");
@@ -201,8 +205,14 @@ export function useVoiceCalls(socket: Socket | null, selected: string, onError: 
       call.queued.delete(event.userId);
       setRemote((old) => old.filter((r) => r.userId !== event.userId));
     };
-    const onSignal = (event: Signal) => { void receive(event).catch((e) => onError(message(e))); };
-    const onDisconnect = () => { finish(false); setIncoming(null); setAvailable(null); };
+    const onSignal = (event: Signal) => {
+      if (!runtime.current) {
+        bufferedSignals.current = [...bufferedSignals.current.slice(-39), event];
+        return;
+      }
+      void receive(event).catch((e) => onError(message(e)));
+    };
+    const onDisconnect = () => { bufferedSignals.current = []; finish(false); setIncoming(null); setAvailable(null); };
     socket.on("call:invite", onInvite);
     socket.on("call:changed", onChanged);
     socket.on("call:ended", onEnded);
@@ -239,7 +249,7 @@ export function CallDock({ calls, conversations, me }: {
 }) {
   const nameOf = (conversationId: string, userId?: string) => {
     const chat = conversations.find((c) => c.id === conversationId);
-    if (!userId) return chat?.title || "Voice call";
+    if (!userId) return chat ? titleOf(chat, me.id) : "Voice call";
     if (userId === me.id) return "You";
     return chat?.members.find((member) => member.id === userId)?.name || "A participant";
   };

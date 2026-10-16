@@ -208,11 +208,19 @@ test("private voice notes validate media, ownership, membership and removal", as
 test("delete for me hides earlier messages and media only for that member", async () => {
   const chat = (await as("post", "/conversations").send({ kind: "group", title: "To clear", memberIds: ["bob", "eve"] }).expect(201)).body;
   const old = (await as("post", `/conversations/${chat.id}/messages`).send({ clientId: randomUUID(), text: "before deletion" }).expect(201)).body;
+  const voice = (await as("post", `/conversations/${chat.id}/voice`, "eve")
+    .field("durationMs", "1250")
+    .attach("voice", Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(80)]), { filename: "private.webm", contentType: "audio/webm" })
+    .expect(201)).body;
+  await as("post", `/conversations/${chat.id}/messages`, "eve").send({ clientId: randomUUID(), voiceId: voice.id }).expect(201);
+  await as("get", `/voice/${voice.id}`, "bob").expect(200);
   await as("delete", `/conversations/${chat.id}`, "bob").expect(204);
   assert.ok(!(await as("get", "/conversations", "bob")).body.some((c) => c.id === chat.id));
   assert.equal((await as("get", `/conversations/${chat.id}/messages`, "bob")).body.items.length, 0);
   await as("post", `/conversations/${chat.id}/read`, "bob").send({ lastReadId: old.id }).expect(400);
   await as("post", "/reports", "bob").send({ messageId: old.id, reason: "old" }).expect(404);
+  await as("get", `/voice/${voice.id}`, "bob").expect(404);
+  await as("get", `/voice/${voice.id}`, "eve").expect(200);
   assert.ok((await as("get", `/conversations/${chat.id}/messages`, "eve")).body.items.some((m) => m.id === old.id));
   const fresh = (await as("post", `/conversations/${chat.id}/messages`, "eve").send({ clientId: randomUUID(), text: "after deletion" }).expect(201)).body;
   assert.ok((await as("get", "/conversations", "bob")).body.some((c) => c.id === chat.id));
