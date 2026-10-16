@@ -141,6 +141,46 @@ test("two people exchange live messages and photos, history survives reload", as
     await other.close();
   }
 });
+test("emoji picker inserts at the cursor and delivers saved messages", async ({ page, browser }, testInfo) => {
+  const other = await browser.newContext(testInfo.project.use);
+  const bob = await other.newPage();
+  const senderName = `Emoji sender ${testInfo.project.name}`;
+  const recipientName = `Emoji recipient ${testInfo.project.name}`;
+  // Independent identities keep repeated browser flows from sharing account limits.
+  async function register(target: Page, name: string) {
+    await target.goto("/");
+    await target.getByRole("button", { name: "New here? Create an account" }).click();
+    await target.getByLabel("Your name").fill(name);
+    await target.getByLabel("Email address").fill(`${name.replaceAll(" ", "-")}-${Date.now()}@example.test`);
+    await target.getByLabel("Password", { exact: true }).fill("TestPassword123!");
+    await target.getByRole("button", { name: "Create account", exact: true }).click();
+    await expect(target.getByRole("heading", { name: "Messages." })).toBeVisible();
+  }
+  try {
+    await register(page, senderName);
+    await register(bob, recipientName);
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Find people").fill(recipientName);
+    await page.locator("label.person").filter({ hasText: recipientName }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await bob.getByRole("button").filter({ hasText: senderName }).first().click();
+    const field = page.getByRole("textbox", { name: "Message", exact: true });
+    await field.fill("Hello Bob");
+    await field.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(6, 6));
+    await page.getByRole("button", { name: "Choose emoji" }).click();
+    await page.screenshot({ path: `test-results/emoji-picker-${testInfo.project.name}.png`, fullPage: true });
+    await page.getByRole("searchbox", { name: "Search emoji" }).fill("sparkles");
+    await page.getByRole("button", { name: "Add sparkles emoji" }).click();
+    const message = "Hello ✨Bob";
+    await expect(field).toHaveValue(message);
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(bob.getByLabel("Messages", { exact: true }).getByText(message, { exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button").filter({ hasText: recipientName }).first().click();
+    await expect(page.getByLabel("Messages", { exact: true }).getByText(message, { exact: true })).toBeVisible();
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
+  } finally { await other.close(); }
+});
 test("group conversation and block controls", async ({ page }, testInfo) => {
   await login(page, "eve");
   await page

@@ -342,10 +342,12 @@ test("real-time delivery, typing, nonmember isolation and logout revocation", as
       .emitWithAck("message:send", {
         conversationId: id,
         clientId: randomUUID(),
-        text: "Realtime",
+        text: "Realtime 🥳✨",
       });
     assert.equal(response.ok, true);
-    assert.equal((await received).text, "Realtime");
+    assert.equal((await received).text, "Realtime 🥳✨");
+    const emojiHistory = await as("get", `/conversations/${id}/messages`, "bob").expect(200);
+    assert.ok(emojiHistory.body.items.some((m) => m.text === "Realtime 🥳✨"));
     const typing = new Promise((resolve) => b.once("typing", resolve));
     a.emit("typing", { conversationId: id, active: true });
     assert.equal((await typing).active, true);
