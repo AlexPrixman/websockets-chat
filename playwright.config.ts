@@ -7,6 +7,11 @@ export default defineConfig({
   expect: { timeout: 10000 },
   use: {
     baseURL: "http://localhost:4173",
+    permissions: ["microphone"],
+    launchOptions: {
+      ...(process.env.CIRCLECHAT_CHROME_PATH ? { executablePath: process.env.CIRCLECHAT_CHROME_PATH } : {}),
+      args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

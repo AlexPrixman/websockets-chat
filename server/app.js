@@ -9,7 +9,8 @@ import { existsSync } from "node:fs";
 import { authentication, managedVerifier } from "./auth.js";
 import { authProxy } from "./auth-proxy.js";
 import { Chat, profile } from "./chat.js";
-import { Photos, storage } from "./storage.js";
+import { Photos, VoiceNotes, storage } from "./storage.js";
+import { VoiceCalls } from "./calls.js";
 import { fail, HttpError, text, uuid } from "./validation.js";
 
 export function createApp(
@@ -30,7 +31,10 @@ export function createApp(
       ),
   });
   const chat = new Chat(db),
-    photos = new Photos(db, chat, files || storage(config));
+    fileStore = files || storage(config),
+    photos = new Photos(db, chat, fileStore),
+    voiceNotes = new VoiceNotes(db, chat, fileStore),
+    calls = new VoiceCalls(chat, io);
   const auth = authentication(
     db,
     config,
@@ -53,6 +57,7 @@ export function createApp(
           ],
           "frame-src": ["'self'", ...(authOrigin ? [authOrigin] : [])],
           "img-src": ["'self'", "blob:", "data:"],
+          "media-src": ["'self'", "blob:"],
           "upgrade-insecure-requests": config.production ? [] : null,
         },
       },
@@ -82,6 +87,7 @@ export function createApp(
     res.json({
       authUrl: config.authUrl,
       maxPhotoBytes: 5 * 1024 * 1024,
+      maxVoiceBytes: 5 * 1024 * 1024,
       moderationEnabled: !!config.moderatorId,
     }),
   );
@@ -119,10 +125,21 @@ export function createApp(
   app.get("/api/conversations", async (req, res) =>
     res.json(await chat.conversations(req.actor.id)),
   );
+  app.get("/api/call-config", (req, res) => res.json({ iceServers: config.iceServers || [{ urls: ["stun:stun.l.google.com:19302"] }] }));
   app.post("/api/conversations", async (req, res) => {
     const c = await chat.create(req.actor.id, req.body);
     await changed(c.id);
     res.status(201).json(c);
+  });
+  app.delete("/api/conversations/:id", async (req, res) => {
+    await chat.hide(req.params.id, req.actor.id);
+    calls.leaveUser(req.actor.id, req.params.id);
+    io.to("user:" + req.actor.id).emit("conversations:changed");
+    res.status(204).end();
+  });
+  app.get("/api/conversations/:id/call", async (req, res) => {
+    await chat.canInteract(req.params.id, req.actor.id);
+    res.json(calls.state(req.params.id));
   });
   app.get("/api/conversations/:id/messages", async (req, res) =>
     res.json(await chat.history(req.params.id, req.actor.id, req.query.before)),
@@ -189,13 +206,29 @@ export function createApp(
       })
       .send(Buffer.from(bytes));
   });
+  app.post(
+    "/api/conversations/:id/voice",
+    rateLimit({ windowMs: 60000, limit: 12, standardHeaders: "draft-8", legacyHeaders: false }),
+    async (req, res, next) => {
+      await chat.canInteract(req.params.id, req.actor.id);
+      next();
+    },
+    multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1 } }).single("voice"),
+    async (req, res) => res.status(201).json(await voiceNotes.upload(req.params.id, req.actor.id, req.file, req.body.durationMs)),
+  );
+  app.get("/api/voice/:id", async (req, res) => {
+    const note = await voiceNotes.download(req.params.id, req.actor.id);
+    res.set({ "Content-Type": note.mimeType, "Cache-Control": "private,no-store" }).send(Buffer.from(note.bytes));
+  });
   app.get("/api/blocks", async (req, res) =>
     res.json(await chat.blocks(req.actor.id)),
   );
   app.put("/api/blocks/:id", async (req, res) => {
-    res.json(await chat.block(req.actor.id, req.params.id));
+    const result = await chat.block(req.actor.id, req.params.id);
+    await calls.block(req.actor.id, req.params.id);
     io.to("user:" + req.actor.id).emit("conversations:changed");
     io.to("user:" + req.params.id).emit("conversations:changed");
+    res.json(result);
   });
   app.delete("/api/blocks/:id", async (req, res) => {
     res.json(await chat.unblock(req.actor.id, req.params.id));
@@ -284,6 +317,7 @@ export function createApp(
   io.on("connection", (socket) => {
     const user = socket.data.actor.id;
     socket.join("user:" + user);
+    calls.register(socket);
     online.set(user, (online.get(user) || 0) + 1);
     presence(user).catch(() => {});
     const expiry = setTimeout(
@@ -357,9 +391,12 @@ export function createApp(
     io,
     chat,
     photos,
+    voiceNotes,
+    calls,
     auth,
     close: () =>
       new Promise((resolve) => {
+        calls.close();
         io.close(() => server.close(() => resolve()));
         if (!server.listening) resolve();
       }),

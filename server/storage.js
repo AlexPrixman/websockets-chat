@@ -18,13 +18,13 @@ export function storage(config) {
     forcePathStyle: true,
   });
   return {
-    put: async (key, bytes) =>
+    put: async (key, bytes, contentType = "image/jpeg") =>
       s3.send(
         new PutObjectCommand({
           Bucket: config.bucket,
           Key: key,
           Body: bytes,
-          ContentType: "image/jpeg",
+          ContentType: contentType,
           CacheControl: "private,no-store",
         }),
       ),
@@ -33,6 +33,15 @@ export function storage(config) {
         await s3.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }))
       ).Body.transformToByteArray(),
   };
+}
+const usageQuery = `SELECT coalesce(sum(bytes),0)::bigint AS total,coalesce(sum(bytes) FILTER(WHERE owner_id=$1 AND created_at>now()-interval '1 day'),0)::bigint AS daily FROM (SELECT owner_id,bytes,created_at FROM photos WHERE status IN ('uploading','ready') UNION ALL SELECT owner_id,bytes,created_at FROM voice_notes WHERE status IN ('uploading','ready')) objects`;
+async function reserve(db, user, bytes) {
+  const used = await db.one(usageQuery, [user]);
+  if (
+    Number(used.total) + bytes > 200 * 1024 * 1024 ||
+    Number(used.daily) + bytes > 25 * 1024 * 1024
+  )
+    fail(429, "Media storage limit reached. Try again later");
 }
 export async function normalizePhoto(file) {
   if (
@@ -78,15 +87,7 @@ export class Photos {
       key = `photos/${id}/${photoId}.jpg`;
     await this.db.transaction(async () => {
       await this.chat.canInteract(id, user);
-      const used = await this.db.one(
-        "SELECT coalesce(sum(bytes),0)::bigint AS total,coalesce(sum(bytes) FILTER(WHERE owner_id=$1 AND created_at>now()-interval '1 day'),0)::bigint AS daily FROM photos WHERE status IN ('uploading','ready')",
-        [user],
-      );
-      if (
-        Number(used.total) + image.bytes.length > 200 * 1024 * 1024 ||
-        Number(used.daily) + image.bytes.length > 25 * 1024 * 1024
-      )
-        fail(429, "Photo storage limit reached. Try again later");
+      await reserve(this.db, user, image.bytes.length);
       await this.db.query(
         "INSERT INTO photos(id,conversation_id,owner_id,object_key,bytes,width,height,status) VALUES ($1,$2,$3,$4,$5,$6,$7,'uploading')",
         [photoId, id, user, key, image.bytes.length, image.width, image.height],
@@ -113,11 +114,75 @@ export class Photos {
   async download(id, user) {
     uuid(id);
     const p = await this.db.one(
-      "SELECT p.* FROM photos p JOIN messages m ON m.photo_id=p.id AND m.deleted_at IS NULL WHERE p.id=$1 AND p.status='ready'",
-      [id],
+      "SELECT p.* FROM photos p JOIN messages m ON m.photo_id=p.id AND m.deleted_at IS NULL JOIN members member ON member.conversation_id=m.conversation_id AND member.user_id=$2 AND m.id>member.hidden_before_id WHERE p.id=$1 AND p.status='ready'",
+      [id, user],
     );
     if (!p) fail(404, "Photo not found");
     await this.chat.membership(p.conversation_id, user);
     return this.files.get(p.object_key);
+  }
+}
+
+export function validateVoice(file, duration) {
+  const durationMs = Number(duration);
+  const mimeType = file?.mimetype?.split(";")[0]?.trim().toLowerCase();
+  const bytes = file?.buffer;
+  const signature =
+    mimeType === "audio/webm"
+      ? bytes?.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+      : mimeType === "audio/ogg"
+        ? bytes?.subarray(0, 4).toString() === "OggS"
+        : mimeType === "audio/mp4"
+          ? bytes?.subarray(4, 8).toString() === "ftyp"
+          : false;
+  if (
+    !bytes?.length ||
+    bytes.length > 5 * 1024 * 1024 ||
+    !signature ||
+    !Number.isInteger(durationMs) ||
+    durationMs < 250 ||
+    durationMs > 60000
+  )
+    fail(400, "Record an audio note up to 60 seconds and 5 MB");
+  return { bytes, mimeType, durationMs };
+}
+
+export class VoiceNotes {
+  constructor(db, chat, files) {
+    this.db = db;
+    this.chat = chat;
+    this.files = files;
+  }
+  async upload(id, user, file, duration) {
+    await this.chat.canInteract(id, user);
+    const voice = validateVoice(file, duration);
+    const noteId = randomUUID();
+    const extension = { "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a" }[voice.mimeType];
+    const key = `voice/${id}/${noteId}.${extension}`;
+    await this.db.transaction(async () => {
+      await this.chat.canInteract(id, user);
+      await reserve(this.db, user, voice.bytes.length);
+      await this.db.query(
+        "INSERT INTO voice_notes(id,conversation_id,owner_id,object_key,bytes,duration_ms,mime_type,status) VALUES ($1,$2,$3,$4,$5,$6,$7,'uploading')",
+        [noteId, id, user, key, voice.bytes.length, voice.durationMs, voice.mimeType],
+      );
+    });
+    try {
+      await this.files.put(key, voice.bytes, voice.mimeType);
+      await this.db.query("UPDATE voice_notes SET status='ready' WHERE id=$1", [noteId]);
+      return { id: noteId, durationMs: voice.durationMs, mimeType: voice.mimeType, bytes: voice.bytes.length };
+    } catch {
+      await this.db.query("UPDATE voice_notes SET status='failed' WHERE id=$1", [noteId]);
+      fail(503, "Voice note upload failed. Please retry");
+    }
+  }
+  async download(id, user) {
+    uuid(id);
+    const note = await this.db.one(
+      "SELECT v.* FROM voice_notes v JOIN messages m ON m.voice_id=v.id AND m.deleted_at IS NULL JOIN members member ON member.conversation_id=m.conversation_id AND member.user_id=$2 AND m.id>member.hidden_before_id WHERE v.id=$1 AND v.status='ready'",
+      [id, user],
+    );
+    if (!note) fail(404, "Voice note not found");
+    return { bytes: await this.files.get(note.object_key), mimeType: note.mime_type };
   }
 }

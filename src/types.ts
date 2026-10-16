@@ -25,6 +25,7 @@ export type Message = {
   deletedAt: string | null;
   createdAt: string;
   photo: null | { id: string; width: number; height: number };
+  voice: null | { id: string; durationMs: number; mimeType: string; bytes: number };
 };
 export const titleOf = (c: Conversation, me: string) =>
   c.kind === "group"
