@@ -25,6 +25,8 @@ export function configuration(env = process.env) {
     throw new Error(
       "Production requires database, managed auth, HTTPS, and photo storage configuration",
     );
+  if (!!env.TURN_URLS !== !!(env.TURN_USERNAME && env.TURN_CREDENTIAL))
+    throw new Error("TURN_URLS requires TURN_USERNAME and TURN_CREDENTIAL");
   return {
     production,
     publicUrl,
@@ -38,5 +40,9 @@ export function configuration(env = process.env) {
     region: env.AWS_REGION || "us-east-2",
     accessKey: env.AWS_ACCESS_KEY_ID || "",
     storageSecret: env.AWS_SECRET_ACCESS_KEY || "",
+    iceServers: [
+      { urls: [env.STUN_URL || "stun:stun.l.google.com:19302"] },
+      ...(env.TURN_URLS ? [{ urls: env.TURN_URLS.split(",").map((url) => url.trim()), username: env.TURN_USERNAME, credential: env.TURN_CREDENTIAL }] : []),
+    ],
   };
 }

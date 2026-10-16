@@ -179,6 +179,141 @@ test("group creation and cursor pagination keep message order", async () => {
   assert.equal(previous.hasMore, false);
   assert.ok(BigInt(previous.items.at(-1).id) < BigInt(page.items[0].id));
 });
+test("private voice notes validate media, ownership, membership and removal", async () => {
+  const bytes = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(80)]);
+  await as("post", `/conversations/${id}/voice`, "eve")
+    .field("durationMs", "1000").attach("voice", bytes, { filename: "note.webm", contentType: "audio/webm" })
+    .expect(404);
+  await as("post", `/conversations/${id}/voice`)
+    .field("durationMs", "1000").attach("voice", Buffer.from("bad"), { filename: "note.webm", contentType: "audio/webm" })
+    .expect(400);
+  const uploaded = await as("post", `/conversations/${id}/voice`)
+    .field("durationMs", "1250").attach("voice", bytes, { filename: "note.webm", contentType: "audio/webm" })
+    .expect(201);
+  const voiceId = uploaded.body.id;
+  await as("get", "/voice/" + voiceId, "bob").expect(404);
+  await as("post", `/conversations/${id}/messages`, "bob")
+    .send({ clientId: randomUUID(), voiceId }).expect(400);
+  const sent = await as("post", `/conversations/${id}/messages`)
+    .send({ clientId: randomUUID(), voiceId }).expect(201);
+  assert.equal(sent.body.voice.durationMs, 1250);
+  assert.equal(sent.body.voice.mimeType, "audio/webm");
+  await as("get", "/voice/" + voiceId, "bob").expect(200).expect("Content-Type", /audio\/webm/);
+  await as("get", "/voice/" + voiceId, "eve").expect(404);
+  await as("post", `/conversations/${id}/messages`)
+    .send({ clientId: randomUUID(), voiceId, photoId }).expect(400);
+  await as("delete", "/messages/" + sent.body.id).expect(200);
+  await as("get", "/voice/" + voiceId, "bob").expect(404);
+});
+test("delete for me hides earlier messages and media only for that member", async () => {
+  const chat = (await as("post", "/conversations").send({ kind: "group", title: "To clear", memberIds: ["bob", "eve"] }).expect(201)).body;
+  const old = (await as("post", `/conversations/${chat.id}/messages`).send({ clientId: randomUUID(), text: "before deletion" }).expect(201)).body;
+  const voice = (await as("post", `/conversations/${chat.id}/voice`, "eve")
+    .field("durationMs", "1250")
+    .attach("voice", Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(80)]), { filename: "private.webm", contentType: "audio/webm" })
+    .expect(201)).body;
+  await as("post", `/conversations/${chat.id}/messages`, "eve").send({ clientId: randomUUID(), voiceId: voice.id }).expect(201);
+  await as("get", `/voice/${voice.id}`, "bob").expect(200);
+  await as("delete", `/conversations/${chat.id}`, "bob").expect(204);
+  assert.ok(!(await as("get", "/conversations", "bob")).body.some((c) => c.id === chat.id));
+  assert.equal((await as("get", `/conversations/${chat.id}/messages`, "bob")).body.items.length, 0);
+  await as("post", `/conversations/${chat.id}/read`, "bob").send({ lastReadId: old.id }).expect(400);
+  await as("post", "/reports", "bob").send({ messageId: old.id, reason: "old" }).expect(404);
+  await as("get", `/voice/${voice.id}`, "bob").expect(404);
+  await as("get", `/voice/${voice.id}`, "eve").expect(200);
+  assert.ok((await as("get", `/conversations/${chat.id}/messages`, "eve")).body.items.some((m) => m.id === old.id));
+  const fresh = (await as("post", `/conversations/${chat.id}/messages`, "eve").send({ clientId: randomUUID(), text: "after deletion" }).expect(201)).body;
+  assert.ok((await as("get", "/conversations", "bob")).body.some((c) => c.id === chat.id));
+  assert.deepEqual((await as("get", `/conversations/${chat.id}/messages`, "bob")).body.items.map((m) => m.id), [fresh.id]);
+  await as("delete", `/conversations/${chat.id}`, "moderator").expect(404);
+});
+test("socket delivery does not reveal cleared history but delivers new messages", async () => {
+  const local = await fixture();
+  await new Promise((resolve) => local.server.listen(0, "127.0.0.1", resolve));
+  const http = request(local.app);
+  const act = (method, path, user) => http[method]("/api" + path).set("Authorization", "Bearer " + user);
+  const url = "http://127.0.0.1:" + local.server.address().port;
+  const bob = io(url, { auth: { token: "bob" }, transports: ["websocket"], autoConnect: false });
+  try {
+    for (const user of ["alice", "bob"]) await act("get", "/me", user).expect(200);
+    const chat = (await act("post", "/conversations", "alice")
+      .send({ kind: "direct", memberIds: ["bob"] }).expect(201)).body;
+    await new Promise((resolve, reject) => {
+      bob.once("connect", resolve); bob.once("connect_error", reject); bob.connect();
+    });
+    const old = (await act("post", `/conversations/${chat.id}/messages`, "alice")
+      .send({ clientId: randomUUID(), text: "earlier" }).expect(201)).body;
+    await act("delete", `/conversations/${chat.id}`, "bob").expect(204);
+    const delivered = [];
+    bob.on("message:updated", (m) => delivered.push(m));
+    await act("delete", `/messages/${old.id}`, "alice").expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(delivered, []);
+    const fresh = new Promise((resolve) => bob.once("message:new", resolve));
+    const next = (await act("post", `/conversations/${chat.id}/messages`, "alice")
+      .send({ clientId: randomUUID(), text: "later" }).expect(201)).body;
+    assert.equal((await fresh).id, next.id);
+  } finally {
+    bob.disconnect();
+    await local.dispose();
+  }
+});
+test("group call signaling stays inside membership and ends on blocking", async () => {
+  const local = await fixture();
+  await new Promise((resolve) => local.server.listen(0, "127.0.0.1", resolve));
+  const url = "http://127.0.0.1:" + local.server.address().port;
+  const http = request(local.app);
+  const act = (method, path, user) => http[method]("/api" + path).set("Authorization", "Bearer " + user);
+  for (const user of ["alice", "bob", "eve", "moderator"])
+    await act("get", "/me", user).expect(200);
+  const group = (await act("post", "/conversations", "alice")
+    .send({ kind: "group", title: "Call room", memberIds: ["bob", "eve"] }).expect(201)).body;
+  const sockets = ["alice", "bob", "eve", "moderator"].map((user) =>
+    io(url, { auth: { token: user }, transports: ["websocket"], autoConnect: false }));
+  try {
+    await Promise.all(sockets.map((s) => new Promise((resolve, reject) => {
+      s.once("connect", resolve); s.once("connect_error", reject); s.connect();
+    })));
+    const [alice, bob, eve, outsider] = sockets;
+    const invites = [bob, eve].map((s) => new Promise((resolve) => s.once("call:invite", resolve)));
+    const started = await alice.timeout(3000).emitWithAck("call:start", { conversationId: group.id });
+    assert.equal(started.ok, true);
+    const [bobInvite, eveInvite] = await Promise.all(invites);
+    assert.equal(bobInvite.callId, started.value.callId);
+    assert.equal(eveInvite.from.id, "alice");
+    assert.equal((await act("get", `/conversations/${group.id}/call`, "moderator").expect(404)).status, 404);
+    const denied = await outsider.timeout(3000).emitWithAck("call:start", { conversationId: group.id });
+    assert.equal(denied.status, 404);
+    const joinedBob = await bob.timeout(3000).emitWithAck("call:join", { conversationId: group.id, callId: started.value.callId });
+    assert.deepEqual(joinedBob.value.peers, ["alice"]);
+    const joinedEve = await eve.timeout(3000).emitWithAck("call:join", { conversationId: group.id, callId: started.value.callId });
+    assert.deepEqual(joinedEve.value.peers, ["alice", "bob"]);
+    const received = new Promise((resolve) => alice.once("call:signal", resolve));
+    const signal = await bob.timeout(3000).emitWithAck("call:signal", {
+      conversationId: group.id, callId: started.value.callId, toUserId: "alice",
+      description: { type: "offer", sdp: "v=0" },
+    });
+    assert.equal(signal.ok, true);
+    assert.equal((await received).fromUserId, "bob");
+    assert.equal((await outsider.timeout(3000).emitWithAck("call:signal", {
+      conversationId: group.id, callId: started.value.callId, toUserId: "alice",
+      description: { type: "offer", sdp: "v=0" },
+    })).status, 404);
+    assert.equal((await bob.timeout(3000).emitWithAck("call:signal", {
+      conversationId: group.id, callId: started.value.callId, toUserId: "alice",
+      candidate: { candidate: 42 },
+    })).status, 400);
+    await bob.timeout(3000).emitWithAck("call:leave", { callId: started.value.callId });
+    assert.deepEqual((await act("get", `/conversations/${group.id}/call`, "alice")).body.participants.sort(), ["alice", "eve"]);
+    const ended = new Promise((resolve) => eve.once("call:ended", resolve));
+    await act("put", "/blocks/eve", "alice").expect(200);
+    assert.equal((await ended).callId, started.value.callId);
+    assert.equal((await act("get", "/conversations", "alice")).status, 200);
+  } finally {
+    sockets.forEach((s) => s.disconnect());
+    await local.dispose();
+  }
+});
 test("real-time delivery, typing, nonmember isolation and logout revocation", async () => {
   await new Promise((resolve) => f.server.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + f.server.address().port;

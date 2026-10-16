@@ -21,8 +21,12 @@ import {
   Trash2,
   Flag,
   CheckCheck,
+  Mic,
+  Phone,
 } from "lucide-react";
 import { api, auth, json, token } from "./api";
+import { RecordingControls, VoiceNote, useVoiceRecorder, type Recording } from "./voice-note";
+import { CallDock, useVoiceCalls } from "./voice-call";
 import {
   mergeMessages,
   titleOf,
@@ -180,7 +184,7 @@ function Login({ done }: { done: () => void }) {
           <div className="sample reply">Wouldn’t miss it. ✨</div>
         </div>
         <footer>
-          <ShieldCheck size={18} /> Member-only chats · Private photo access
+          <ShieldCheck size={18} /> Member-only chats · Private media access
         </footer>
       </section>
       <section className="auth">
@@ -406,6 +410,7 @@ function ChatApp({
     [query, setQuery] = useState(""),
     [error, setError] = useState(""),
     [connected, setConnected] = useState(false),
+    [liveSocket, setLiveSocket] = useState<Socket | null>(null),
     [loading, setLoading] = useState(false),
     [hasMore, setHasMore] = useState(false),
     [draft, setDraft] = useState(""),
@@ -423,13 +428,17 @@ function ChatApp({
     pending = useRef<{
       text: string;
       file: File | null;
+      voice: Recording | null;
       clientId: string;
       photoId?: string;
+      voiceId?: string;
     } | null>(null),
     bottom = useRef<HTMLDivElement>(null),
     typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     lastTypingSent = useRef(0);
   const current = conversations.find((c) => c.id === selected);
+  const voice = useVoiceRecorder(selected, setError);
+  const calls = useVoiceCalls(liveSocket, selected, setError);
   const refresh = async () => {
     setConversations(await api<Conversation[]>("/conversations"));
   };
@@ -483,6 +492,7 @@ function ChatApp({
       },
     });
     socket.current = s;
+    setLiveSocket(s);
     s.on("connect", () => {
       setConnected(true);
       setError("");
@@ -551,6 +561,7 @@ function ChatApp({
       clearTimeout(typingTimer.current);
       s.disconnect();
       socket.current = null;
+      setLiveSocket(null);
     };
   }, []);
   const lastId = messages.at(-1)?.id;
@@ -572,16 +583,17 @@ function ChatApp({
   }, [selected, lastId]);
   async function send(e: FormEvent) {
     e.preventDefault();
-    if (busy || (!draft.trim() && !photo) || !selected) return;
+    if (busy || voice.recording || (!draft.trim() && !photo && !voice.note) || !selected) return;
     const id = selected;
     setBusy(true);
     setError("");
     try {
       let attempt = pending.current;
-      if (!attempt || attempt.text !== draft || attempt.file !== photo)
+      if (!attempt || attempt.text !== draft || attempt.file !== photo || attempt.voice !== voice.note)
         attempt = pending.current = {
           text: draft,
           file: photo,
+          voice: voice.note,
           clientId: crypto.randomUUID(),
         };
       if (photo && !attempt.photoId) {
@@ -593,18 +605,29 @@ function ChatApp({
         );
         attempt.photoId = result.id;
       }
+      if (voice.note && !attempt.voiceId) {
+        const data = new FormData();
+        data.append("durationMs", String(voice.note.durationMs));
+        data.append("voice", voice.note.file);
+        const result = await api<{ id: string }>(
+          `/conversations/${id}/voice`, { method: "POST", body: data },
+        );
+        attempt.voiceId = result.id;
+      }
       const message = await api<Message>(
         `/conversations/${id}/messages`,
         json("POST", {
           text: attempt.text,
           clientId: attempt.clientId,
           photoId: attempt.photoId,
+          voiceId: attempt.voiceId,
         }),
       );
       if (selectedRef.current === id) {
         setMessages((old) => mergeMessages(old, [message]));
         setDraft("");
         setPhoto(null);
+        voice.clear();
         pending.current = null;
       }
       await refresh();
@@ -758,13 +781,24 @@ function ChatApp({
                           : "Your private conversation"}
                 </p>
               </div>
-              <button
-                className="icon"
-                aria-label="Conversation members"
-                onClick={() => setModal("settings")}
-              >
-                <Users />
-              </button>
+              <div className="chat-header-actions">
+                <button className="icon" aria-label={calls.available?.active ? "Join voice call" : "Start voice call"}
+                  title={calls.available?.active ? "Join voice call" : "Start voice call"}
+                  disabled={!connected || current.blocked || !!calls.session}
+                  onClick={() => {
+                    if (calls.available?.active && calls.available.callId)
+                      void calls.join(current.id, calls.available.callId);
+                    else void calls.start(current.id);
+                  }}><Phone size={19} /></button>
+                <button className="icon" aria-label="Conversation members" onClick={() => setModal("settings")}><Users size={19} /></button>
+                <button className="icon" aria-label="Delete conversation for me" title="Delete conversation for me"
+                  onClick={() => {
+                    if (!confirm("Delete this chat from your history? Other members keep their messages. New messages can bring it back.")) return;
+                    void api(`/conversations/${current.id}`, { method: "DELETE" })
+                      .then(async () => { if (selectedRef.current === current.id) setSelected(""); await refresh(); })
+                      .catch((e) => setError(errorText(e)));
+                  }}><Trash2 size={19} /></button>
+              </div>
             </header>
             <div
               className="message-area"
@@ -803,7 +837,8 @@ function ChatApp({
                       {m.senderId === me.id ? "You" : m.senderName}
                     </small>
                     {m.photo && <Photo id={m.photo.id} />}
-                    <p>{m.deletedAt ? <em>Message removed</em> : m.text}</p>
+                    {m.voice && <VoiceNote id={m.voice.id} durationMs={m.voice.durationMs} />}
+                    {(m.deletedAt || m.text) && <p>{m.deletedAt ? <em>Message removed</em> : m.text}</p>}
                     <div className="message-meta">
                       <time dateTime={m.createdAt}>
                         {new Date(m.createdAt).toLocaleTimeString(undefined, {
@@ -867,6 +902,7 @@ function ChatApp({
               <div ref={bottom} />
             </div>
             <div className="composer-wrap">
+              <RecordingControls voice={voice} disabled={busy} />
               {photo && (
                 <div className="attachment">
                   {photo.name}
@@ -886,16 +922,22 @@ function ChatApp({
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
-                    disabled={busy || current.blocked}
+                    disabled={busy || current.blocked || voice.recording}
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       if (f && f.size > 5 * 1024 * 1024)
                         setError("Choose a photo up to 5 MB");
-                      else setPhoto(f || null);
+                      else {
+                        if (f) voice.clear();
+                        setPhoto(f || null);
+                      }
                       e.target.value = "";
                     }}
                   />
                 </label>
+                <button type="button" className="record-button" aria-label="Record voice note"
+                  title="Record a voice note" disabled={busy || current.blocked || voice.recording || !!voice.note}
+                  onClick={() => { setPhoto(null); void voice.start(); }}><Mic size={19} /></button>
                 <textarea
                   aria-label="Message"
                   placeholder={
@@ -935,7 +977,7 @@ function ChatApp({
                   className="send"
                   aria-label="Send message"
                   disabled={
-                    busy || current.blocked || (!draft.trim() && !photo)
+                    busy || current.blocked || voice.recording || (!draft.trim() && !photo && !voice.note)
                   }
                 >
                   <Send size={20} />
@@ -970,11 +1012,12 @@ function ChatApp({
             </button>
             <small>
               <ShieldCheck size={15} /> Only conversation members can access
-              messages and photos.
+              messages and media.
             </small>
           </div>
         )}
       </main>
+      <CallDock calls={calls} conversations={conversations} me={me} />
       {modal === "new" && (
         <NewChat
           close={() => setModal(null)}

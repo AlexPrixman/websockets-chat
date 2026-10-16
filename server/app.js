@@ -9,7 +9,8 @@ import { existsSync } from "node:fs";
 import { authentication, managedVerifier } from "./auth.js";
 import { authProxy } from "./auth-proxy.js";
 import { Chat, profile } from "./chat.js";
-import { Photos, storage } from "./storage.js";
+import { Photos, VoiceNotes, storage } from "./storage.js";
+import { VoiceCalls } from "./calls.js";
 import { fail, HttpError, text, uuid } from "./validation.js";
 
 export function createApp(
@@ -30,7 +31,10 @@ export function createApp(
       ),
   });
   const chat = new Chat(db),
-    photos = new Photos(db, chat, files || storage(config));
+    fileStore = files || storage(config),
+    photos = new Photos(db, chat, fileStore),
+    voiceNotes = new VoiceNotes(db, chat, fileStore),
+    calls = new VoiceCalls(chat, io);
   const auth = authentication(
     db,
     config,
@@ -53,6 +57,7 @@ export function createApp(
           ],
           "frame-src": ["'self'", ...(authOrigin ? [authOrigin] : [])],
           "img-src": ["'self'", "blob:", "data:"],
+          "media-src": ["'self'", "blob:"],
           "upgrade-insecure-requests": config.production ? [] : null,
         },
       },
@@ -82,21 +87,26 @@ export function createApp(
     res.json({
       authUrl: config.authUrl,
       maxPhotoBytes: 5 * 1024 * 1024,
+      maxVoiceBytes: 5 * 1024 * 1024,
       moderationEnabled: !!config.moderatorId,
     }),
   );
-  app.use(
-    "/api",
-    rateLimit({
-      windowMs: 60000,
-      limit: 240,
-      standardHeaders: "draft-8",
-      legacyHeaders: false,
-      message: { error: "Too many requests. Please wait a moment" },
-    }),
-  );
-  app.use("/api/auth", authTestRouter || authProxy(config));
+  // Bound invalid-token traffic before verification; the tighter limit below
+  // is per signed-in account so people sharing an IP do not throttle each other.
+  app.use("/api", rateLimit({
+    windowMs: 60000, limit: 1200, standardHeaders: "draft-8", legacyHeaders: false,
+    message: { error: "Too many requests. Please wait a moment" },
+  }));
+  app.use("/api/auth", rateLimit({
+    windowMs: 60000, limit: 240, standardHeaders: "draft-8", legacyHeaders: false,
+    message: { error: "Too many requests. Please wait a moment" },
+  }), authTestRouter || authProxy(config));
   app.use("/api", auth.middleware);
+  app.use("/api", rateLimit({
+    windowMs: 60000, limit: 240, standardHeaders: "draft-8", legacyHeaders: false,
+    keyGenerator: (req) => req.actor.id,
+    message: { error: "Too many requests. Please wait a moment" },
+  }));
   app.get("/api/me", (req, res) =>
     res.json({ ...profile(req.actor), moderator: req.actor.moderator }),
   );
@@ -119,10 +129,21 @@ export function createApp(
   app.get("/api/conversations", async (req, res) =>
     res.json(await chat.conversations(req.actor.id)),
   );
+  app.get("/api/call-config", (req, res) => res.json({ iceServers: config.iceServers || [{ urls: ["stun:stun.l.google.com:19302"] }] }));
   app.post("/api/conversations", async (req, res) => {
     const c = await chat.create(req.actor.id, req.body);
     await changed(c.id);
     res.status(201).json(c);
+  });
+  app.delete("/api/conversations/:id", async (req, res) => {
+    await chat.hide(req.params.id, req.actor.id);
+    calls.leaveUser(req.actor.id, req.params.id);
+    io.to("user:" + req.actor.id).emit("conversations:changed");
+    res.status(204).end();
+  });
+  app.get("/api/conversations/:id/call", async (req, res) => {
+    await chat.canInteract(req.params.id, req.actor.id);
+    res.json(calls.state(req.params.id));
   });
   app.get("/api/conversations/:id/messages", async (req, res) =>
     res.json(await chat.history(req.params.id, req.actor.id, req.query.before)),
@@ -141,7 +162,7 @@ export function createApp(
   });
   app.post("/api/conversations/:id/messages", async (req, res) => {
     const m = await chat.send(req.params.id, req.actor.id, req.body);
-    await broadcast(m.conversationId, "message:new", m);
+    await broadcastVisible(m, "message:new");
     res.status(201).json(m);
   });
   app.post("/api/conversations/:id/read", async (req, res) => {
@@ -155,7 +176,7 @@ export function createApp(
   });
   app.delete("/api/messages/:id", async (req, res) => {
     const m = await chat.remove(req.params.id, req.actor.id);
-    await broadcast(m.conversationId, "message:updated", m);
+    await broadcastVisible(m, "message:updated");
     res.json(m);
   });
   const upload = multer({
@@ -189,13 +210,29 @@ export function createApp(
       })
       .send(Buffer.from(bytes));
   });
+  app.post(
+    "/api/conversations/:id/voice",
+    rateLimit({ windowMs: 60000, limit: 12, standardHeaders: "draft-8", legacyHeaders: false }),
+    async (req, res, next) => {
+      await chat.canInteract(req.params.id, req.actor.id);
+      next();
+    },
+    multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1 } }).single("voice"),
+    async (req, res) => res.status(201).json(await voiceNotes.upload(req.params.id, req.actor.id, req.file, req.body.durationMs)),
+  );
+  app.get("/api/voice/:id", async (req, res) => {
+    const note = await voiceNotes.download(req.params.id, req.actor.id);
+    res.set({ "Content-Type": note.mimeType, "Cache-Control": "private,no-store" }).send(Buffer.from(note.bytes));
+  });
   app.get("/api/blocks", async (req, res) =>
     res.json(await chat.blocks(req.actor.id)),
   );
   app.put("/api/blocks/:id", async (req, res) => {
-    res.json(await chat.block(req.actor.id, req.params.id));
+    const result = await chat.block(req.actor.id, req.params.id);
+    await calls.block(req.actor.id, req.params.id);
     io.to("user:" + req.actor.id).emit("conversations:changed");
     io.to("user:" + req.params.id).emit("conversations:changed");
+    res.json(result);
   });
   app.delete("/api/blocks/:id", async (req, res) => {
     res.json(await chat.unblock(req.actor.id, req.params.id));
@@ -243,7 +280,7 @@ export function createApp(
         .status(409)
         .json({ error: "That handle or attachment is already in use" });
     if (e instanceof multer.MulterError)
-      return res.status(400).json({ error: "Choose one photo up to 5 MB" });
+      return res.status(400).json({ error: "Choose one attachment up to 5 MB" });
     if (e.type === "entity.parse.failed")
       return res.status(400).json({ error: "Invalid JSON" });
     if (e.type === "entity.too.large")
@@ -258,6 +295,14 @@ export function createApp(
   async function broadcast(id, event, value) {
     for (const user of await chat.recipients(id))
       io.to("user:" + user).emit(event, value);
+  }
+  async function broadcastVisible(message, event) {
+    const viewers = await db.all(
+      "SELECT user_id FROM members WHERE conversation_id=$1 AND hidden_before_id<$2::bigint",
+      [message.conversationId, message.id],
+    );
+    for (const viewer of viewers)
+      io.to("user:" + viewer.user_id).emit(event, message);
   }
   async function changed(id) {
     await broadcast(id, "conversations:changed");
@@ -284,6 +329,7 @@ export function createApp(
   io.on("connection", (socket) => {
     const user = socket.data.actor.id;
     socket.join("user:" + user);
+    calls.register(socket);
     online.set(user, (online.get(user) || 0) + 1);
     presence(user).catch(() => {});
     const expiry = setTimeout(
@@ -314,7 +360,7 @@ export function createApp(
       try {
         if (!body || typeof body !== "object") fail(400, "Invalid message");
         const m = await chat.send(body.conversationId, user, body);
-        await broadcast(m.conversationId, "message:new", m);
+        await broadcastVisible(m, "message:new");
         ack({ ok: true, value: m });
       } catch (e) {
         ack({
@@ -357,9 +403,12 @@ export function createApp(
     io,
     chat,
     photos,
+    voiceNotes,
+    calls,
     auth,
     close: () =>
       new Promise((resolve) => {
+        calls.close();
         io.close(() => server.close(() => resolve()));
         if (!server.listening) resolve();
       }),

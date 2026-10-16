@@ -103,6 +103,8 @@ test("two people exchange live messages and photos, history survives reload", as
     await expect(
       bob.getByRole("img", { name: "Shared photo" }).last(),
     ).toBeVisible();
+    await expect(page.getByRole("img", { name: "Shared photo" }).last()).toBeVisible();
+    const ownPhotos = await page.getByRole("img", { name: "Shared photo" }).count();
     await page.reload();
     await page.getByRole("button").filter({ hasText: "Bob" }).first().click();
     await expect(
@@ -111,7 +113,7 @@ test("two people exchange live messages and photos, history survives reload", as
         .getByText(text, { exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("img", { name: "Shared photo" })).toHaveCount(
-      priorPhotos + 1,
+      ownPhotos,
     );
     await page.context().setOffline(true);
     const missed = "While you were away " + Date.now();
@@ -186,4 +188,124 @@ test("group conversation and block controls", async ({ page }, testInfo) => {
   await expect(
     page.getByRole("textbox", { name: "Message", exact: true }),
   ).toBeEnabled();
+});
+
+test("voice note playback and delete for me preserve the other member's history", async ({ page, browser }, testInfo) => {
+  const other = await browser.newContext(testInfo.project.use);
+  const bob = await other.newPage();
+  try {
+    await login(page, "alice");
+    await login(bob, "bob");
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Find people").fill("Bob");
+    await page.locator("label.person").filter({ hasText: "Bob" }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await bob.getByRole("button").filter({ hasText: "Alice" }).first().click();
+    const old = `Keep for Bob ${Date.now()}`;
+    await page.getByRole("textbox", { name: "Message" }).fill(old);
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(bob.getByLabel("Messages", { exact: true }).getByText(old)).toBeVisible();
+    await page.getByRole("button", { name: "Record voice note" }).click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Recording 1s" })).toBeVisible();
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(page.getByRole("button", { name: "Remove voice note" })).toBeVisible();
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(bob.locator('audio[aria-label="Voice note"]')).toBeVisible();
+    const source = await bob.locator('audio[aria-label="Voice note"]').getAttribute("src");
+    expect(source).toMatch(/^blob:/);
+    const playable = await bob.locator('audio[aria-label="Voice note"]').evaluate(async (audio: HTMLAudioElement) => {
+      await new Promise((resolve, reject) => {
+        if (audio.readyState >= 1) return resolve(null);
+        audio.addEventListener("loadedmetadata", resolve, { once: true });
+        audio.addEventListener("error", reject, { once: true });
+        audio.load();
+      });
+      return audio.duration > 0;
+    });
+    expect(playable).toBe(true);
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("button", { name: "Delete conversation for me" }).click();
+    await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeHidden();
+    await expect(page.getByRole("button").filter({ hasText: "Bob" })).toHaveCount(0);
+    await expect(bob.getByLabel("Messages", { exact: true }).getByText(old)).toBeVisible();
+    const next = `New after deletion ${Date.now()}`;
+    await bob.getByRole("textbox", { name: "Message" }).fill(next);
+    await bob.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByRole("button").filter({ hasText: "Bob" }).first()).toBeVisible();
+    await page.getByRole("button").filter({ hasText: "Bob" }).first().click();
+    await expect(page.getByLabel("Messages", { exact: true }).getByText(next)).toBeVisible();
+    await expect(page.getByLabel("Messages", { exact: true }).getByText(old)).toHaveCount(0);
+    await expect(page.locator('audio[aria-label="Voice note"]')).toHaveCount(0);
+    await page.reload();
+    await page.getByRole("button").filter({ hasText: "Bob" }).first().click();
+    await expect(page.getByLabel("Messages", { exact: true }).getByText(old)).toHaveCount(0);
+  } finally { await other.close(); }
+});
+
+test("three members connect group audio, mute and leave", async ({ page, browser }, testInfo) => {
+  test.setTimeout(90000);
+  const bobContext = await browser.newContext(testInfo.project.use);
+  const eveContext = await browser.newContext(testInfo.project.use);
+  const bob = await bobContext.newPage();
+  const eve = await eveContext.newPage();
+  try {
+    await login(page, "alice");
+    await login(bob, "bob");
+    await login(eve, "eve");
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Make it a group").check();
+    const title = `Audio ${testInfo.project.name} ${Date.now()}`;
+    await page.getByLabel("Group name").fill(title);
+    for (const name of ["Bob", "Eve"])
+      await page.locator("label.person").filter({ hasText: name }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await page.getByRole("button", { name: "Start voice call" }).click();
+    await expect(page.getByRole("region", { name: "Voice call" })).toContainText("Ringing your people");
+    await expect(bob.getByRole("region", { name: "Voice call" })).toContainText("Incoming voice call");
+    await expect(eve.getByRole("region", { name: "Voice call" })).toContainText("Incoming voice call");
+    await bob.getByRole("button", { name: "Join call" }).click();
+    await expect(page.getByRole("region", { name: "Voice call" })).toContainText("2 in call");
+    await eve.getByRole("button", { name: "Join call" }).click();
+    await expect(page.getByRole("region", { name: "Voice call" })).toContainText("3 in call");
+    await expect(page.locator(".remote-audio audio")).toHaveCount(2);
+    await expect(bob.locator(".remote-audio audio")).toHaveCount(2);
+    await expect(eve.locator(".remote-audio audio")).toHaveCount(2);
+    const remoteTracks = await page.locator(".remote-audio audio").evaluateAll((elements) =>
+      elements.every((el) => (el as HTMLAudioElement).srcObject instanceof MediaStream &&
+        ((el as HTMLAudioElement).srcObject as MediaStream).getAudioTracks().some((track) => track.readyState === "live")),
+    );
+    expect(remoteTracks).toBe(true);
+    await bob.getByRole("button", { name: "Mute", exact: true }).click();
+    await expect(bob.getByRole("button", { name: "Unmute" })).toBeVisible();
+    await eve.getByRole("button", { name: "Leave call" }).click();
+    await expect(page.locator(".remote-audio audio")).toHaveCount(1);
+    await page.getByRole("button", { name: "Leave call" }).click();
+    await expect(bob.getByRole("region", { name: "Voice call" })).toContainText("1 in call");
+    await bob.getByRole("button", { name: "Leave call" }).click();
+    await expect(bob.getByRole("region", { name: "Voice call" })).toHaveCount(0);
+  } finally { await bobContext.close(); await eveContext.close(); }
+});
+
+test("a direct voice call connects and ends for both people", async ({ page, browser }, testInfo) => {
+  const other = await browser.newContext(testInfo.project.use);
+  const bob = await other.newPage();
+  try {
+    await login(page, "alice");
+    await login(bob, "bob");
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Find people").fill("Bob");
+    await page.locator("label.person").filter({ hasText: "Bob" }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Start voice call" }).click();
+    await expect(bob.getByRole("region", { name: "Voice call" })).toContainText("Incoming voice call");
+    await bob.getByRole("button", { name: "Join call" }).click();
+    await expect(page.locator(".remote-audio audio")).toHaveCount(1);
+    await expect(bob.locator(".remote-audio audio")).toHaveCount(1);
+    await page.getByRole("button", { name: "Leave call" }).click();
+    await expect(bob.getByRole("region", { name: "Voice call" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Voice call" })).toHaveCount(0);
+  } finally { await other.close(); }
 });
