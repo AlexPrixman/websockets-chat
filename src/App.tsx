@@ -27,6 +27,7 @@ import {
 import { api, auth, json, token } from "./api";
 import { RecordingControls, VoiceNote, useVoiceRecorder, type Recording } from "./voice-note";
 import { CallDock, useVoiceCalls } from "./voice-call";
+import { EmojiPicker, insertEmoji } from "./emoji-picker";
 import {
   mergeMessages,
   titleOf,
@@ -434,6 +435,7 @@ function ChatApp({
       voiceId?: string;
     } | null>(null),
     bottom = useRef<HTMLDivElement>(null),
+    messageInput = useRef<HTMLTextAreaElement>(null),
     typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     lastTypingSent = useRef(0);
   const current = conversations.find((c) => c.id === selected);
@@ -938,7 +940,28 @@ function ChatApp({
                 <button type="button" className="record-button" aria-label="Record voice note"
                   title="Record a voice note" disabled={busy || current.blocked || voice.recording || !!voice.note}
                   onClick={() => { setPhoto(null); void voice.start(); }}><Mic size={19} /></button>
+                <EmojiPicker
+                  key={selected}
+                  disabled={busy || current.blocked || voice.recording}
+                  onSelect={(emoji) => {
+                    const field = messageInput.current;
+                    if (!field) return false;
+                    const inserted = insertEmoji(draft, field.selectionStart, field.selectionEnd, emoji);
+                    if (!inserted) {
+                      setError("Message is too long to add that emoji.");
+                      return false;
+                    }
+                    setDraft(inserted.text);
+                    socket.current?.emit("typing", { conversationId: selected, active: true });
+                    requestAnimationFrame(() => {
+                      field.focus();
+                      field.setSelectionRange(inserted.caret, inserted.caret);
+                    });
+                    return true;
+                  }}
+                />
                 <textarea
+                  ref={messageInput}
                   aria-label="Message"
                   placeholder={
                     current.blocked

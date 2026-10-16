@@ -141,6 +141,33 @@ test("two people exchange live messages and photos, history survives reload", as
     await other.close();
   }
 });
+test("emoji picker inserts at the cursor and delivers saved messages", async ({ page, browser }, testInfo) => {
+  const other = await browser.newContext(testInfo.project.use);
+  const bob = await other.newPage();
+  try {
+    await login(page, "alice");
+    await login(bob, "bob");
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Find people").fill("Bob");
+    await page.locator("label.person").filter({ hasText: "Bob" }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await bob.getByRole("button").filter({ hasText: "Alice" }).first().click();
+    const field = page.getByRole("textbox", { name: "Message", exact: true });
+    await field.fill("Hello Bob");
+    await field.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(6, 6));
+    await page.getByRole("button", { name: "Choose emoji" }).click();
+    await page.getByRole("searchbox", { name: "Search emoji" }).fill("sparkles");
+    await page.getByRole("button", { name: "Add sparkles emoji" }).click();
+    const message = "Hello ✨Bob";
+    await expect(field).toHaveValue(message);
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(bob.getByLabel("Messages", { exact: true }).getByText(message, { exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button").filter({ hasText: "Bob" }).first().click();
+    await expect(page.getByLabel("Messages", { exact: true }).getByText(message, { exact: true })).toBeVisible();
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
+  } finally { await other.close(); }
+});
 test("group conversation and block controls", async ({ page }, testInfo) => {
   await login(page, "eve");
   await page

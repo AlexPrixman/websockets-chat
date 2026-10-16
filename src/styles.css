@@ -665,6 +665,7 @@ small,
 .remote-audio { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .remote-audio audio { width: 100%; height: 36px; }
 .composer-wrap {
+  position: relative;
   padding: 15px 30px 13px;
   background: #f6f8f2;
 }
@@ -678,6 +679,8 @@ small,
   border-radius: 14px;
 }
 .composer textarea {
+  min-width: 0;
+  flex: 1;
   border: 0;
   resize: none;
   max-height: 100px;
@@ -686,12 +689,70 @@ small,
   font-size: 13px;
   background: transparent;
 }
+.emoji-picker {
+  flex: 0 0 auto;
+}
+.emoji-trigger {
+  width: 34px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: #89967f;
+  border-radius: 9px;
+}
+.emoji-trigger:hover,
+.emoji-trigger[aria-expanded="true"] {
+  color: #315e49;
+  background: #edf2e9;
+}
+.emoji-panel {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  left: 30px;
+  z-index: 5;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(370px, 55dvh);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #dce5d8;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px #24332f24;
+}
+.emoji-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.emoji-panel-head strong { font: 800 14px Manrope, sans-serif; }
+.emoji-panel-head button { display: grid; place-items: center; color: #78837e; }
+.emoji-panel input { flex: 0 0 auto; padding: 9px 11px; font-size: 14px; }
+.emoji-groups { overflow-y: auto; min-height: 0; padding: 0 2px; }
+.emoji-groups h3 {
+  margin: 14px 0 7px;
+  color: #657567;
+  font: 700 11px Manrope, sans-serif;
+}
+.emoji-groups section:first-child h3 { margin-top: 12px; }
+.emoji-groups p { margin: 16px 0 2px; color: #78837e; font-size: 13px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.emoji-grid button {
+  height: 39px;
+  border-radius: 9px;
+  font-size: 24px;
+  line-height: 1;
+}
+.emoji-grid button:hover,
+.emoji-grid button:focus-visible { background: #edf2e9; }
 .attach {
   margin: 0;
   display: grid;
   place-items: center;
   width: 38px;
   height: 38px;
+  flex-shrink: 0;
   color: #89967f;
   cursor: pointer;
 }
@@ -948,6 +1009,7 @@ dialog p {
   .composer-wrap {
     padding: 12px;
   }
+  .emoji-panel { left: 12px; }
   .welcome h2 {
     font-size: 34px;
   }
@@ -1058,6 +1120,9 @@ dialog p {
   .composer textarea {
     font-size: 16px;
   }
+  .composer { gap: 5px; padding: 8px 6px; }
+  .attach, .emoji-trigger, .record-button { width: 32px; }
+  .emoji-panel { max-height: min(330px, 45dvh); }
   .composer-wrap {
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }

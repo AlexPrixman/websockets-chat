@@ -8,7 +8,7 @@ A responsive, real-time messenger built with React, TypeScript, Express, Socket.
 
 - Email/password accounts, session restoration, email verification and password recovery screens.
 - Direct conversations and named groups of up to nine people.
-- Live messages, typing indicators, online status, unread counts and read receipts.
+- Live messages, a searchable emoji picker, typing indicators, online status, unread counts and read receipts.
 - Persistent message history with cursor pagination; idempotent sending prevents duplicate retries.
 - Photo sharing (JPEG, PNG, WebP, up to 5 MB). Images are decoded, stripped of metadata, resized and re-encoded. Only conversation members can download attached photos.
 - Voice notes (up to 60 seconds and 5 MB) recorded in the browser, stored privately, and playable only by members who can see the attached message. Supported browser formats: WebM, Ogg, MP4 audio.
