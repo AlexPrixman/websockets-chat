@@ -227,6 +227,37 @@ test("delete for me hides earlier messages and media only for that member", asyn
   assert.deepEqual((await as("get", `/conversations/${chat.id}/messages`, "bob")).body.items.map((m) => m.id), [fresh.id]);
   await as("delete", `/conversations/${chat.id}`, "moderator").expect(404);
 });
+test("socket delivery does not reveal cleared history but delivers new messages", async () => {
+  const local = await fixture();
+  await new Promise((resolve) => local.server.listen(0, "127.0.0.1", resolve));
+  const http = request(local.app);
+  const act = (method, path, user) => http[method]("/api" + path).set("Authorization", "Bearer " + user);
+  const url = "http://127.0.0.1:" + local.server.address().port;
+  const bob = io(url, { auth: { token: "bob" }, transports: ["websocket"], autoConnect: false });
+  try {
+    for (const user of ["alice", "bob"]) await act("get", "/me", user).expect(200);
+    const chat = (await act("post", "/conversations", "alice")
+      .send({ kind: "direct", memberIds: ["bob"] }).expect(201)).body;
+    await new Promise((resolve, reject) => {
+      bob.once("connect", resolve); bob.once("connect_error", reject); bob.connect();
+    });
+    const old = (await act("post", `/conversations/${chat.id}/messages`, "alice")
+      .send({ clientId: randomUUID(), text: "earlier" }).expect(201)).body;
+    await act("delete", `/conversations/${chat.id}`, "bob").expect(204);
+    const delivered = [];
+    bob.on("message:updated", (m) => delivered.push(m));
+    await act("delete", `/messages/${old.id}`, "alice").expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(delivered, []);
+    const fresh = new Promise((resolve) => bob.once("message:new", resolve));
+    const next = (await act("post", `/conversations/${chat.id}/messages`, "alice")
+      .send({ clientId: randomUUID(), text: "later" }).expect(201)).body;
+    assert.equal((await fresh).id, next.id);
+  } finally {
+    bob.disconnect();
+    await local.dispose();
+  }
+});
 test("group call signaling stays inside membership and ends on blocking", async () => {
   const local = await fixture();
   await new Promise((resolve) => local.server.listen(0, "127.0.0.1", resolve));

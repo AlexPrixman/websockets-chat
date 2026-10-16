@@ -156,7 +156,7 @@ export function createApp(
   });
   app.post("/api/conversations/:id/messages", async (req, res) => {
     const m = await chat.send(req.params.id, req.actor.id, req.body);
-    await broadcast(m.conversationId, "message:new", m);
+    await broadcastVisible(m, "message:new");
     res.status(201).json(m);
   });
   app.post("/api/conversations/:id/read", async (req, res) => {
@@ -170,7 +170,7 @@ export function createApp(
   });
   app.delete("/api/messages/:id", async (req, res) => {
     const m = await chat.remove(req.params.id, req.actor.id);
-    await broadcast(m.conversationId, "message:updated", m);
+    await broadcastVisible(m, "message:updated");
     res.json(m);
   });
   const upload = multer({
@@ -290,6 +290,14 @@ export function createApp(
     for (const user of await chat.recipients(id))
       io.to("user:" + user).emit(event, value);
   }
+  async function broadcastVisible(message, event) {
+    const viewers = await db.all(
+      "SELECT user_id FROM members WHERE conversation_id=$1 AND hidden_before_id<$2::bigint",
+      [message.conversationId, message.id],
+    );
+    for (const viewer of viewers)
+      io.to("user:" + viewer.user_id).emit(event, message);
+  }
   async function changed(id) {
     await broadcast(id, "conversations:changed");
   }
@@ -346,7 +354,7 @@ export function createApp(
       try {
         if (!body || typeof body !== "object") fail(400, "Invalid message");
         const m = await chat.send(body.conversationId, user, body);
-        await broadcast(m.conversationId, "message:new", m);
+        await broadcastVisible(m, "message:new");
         ack({ ok: true, value: m });
       } catch (e) {
         ack({
