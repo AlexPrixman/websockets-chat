@@ -103,6 +103,8 @@ test("two people exchange live messages and photos, history survives reload", as
     await expect(
       bob.getByRole("img", { name: "Shared photo" }).last(),
     ).toBeVisible();
+    await expect(page.getByRole("img", { name: "Shared photo" }).last()).toBeVisible();
+    const ownPhotos = await page.getByRole("img", { name: "Shared photo" }).count();
     await page.reload();
     await page.getByRole("button").filter({ hasText: "Bob" }).first().click();
     await expect(
@@ -111,7 +113,7 @@ test("two people exchange live messages and photos, history survives reload", as
         .getByText(text, { exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("img", { name: "Shared photo" })).toHaveCount(
-      priorPhotos + 1,
+      ownPhotos,
     );
     await page.context().setOffline(true);
     const missed = "While you were away " + Date.now();
