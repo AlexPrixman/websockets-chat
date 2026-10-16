@@ -710,7 +710,7 @@ small,
   bottom: calc(100% - 4px);
   left: 30px;
   z-index: 5;
-  width: min(360px, calc(100vw - 24px));
+  width: min(360px, calc(100% - 60px));
   max-height: min(370px, 55dvh);
   display: flex;
   flex-direction: column;
@@ -1009,7 +1009,7 @@ dialog p {
   .composer-wrap {
     padding: 12px;
   }
-  .emoji-panel { left: 12px; }
+  .emoji-panel { left: 12px; width: min(360px, calc(100% - 24px)); }
   .welcome h2 {
     font-size: 34px;
   }
