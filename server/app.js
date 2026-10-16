@@ -91,6 +91,12 @@ export function createApp(
       moderationEnabled: !!config.moderatorId,
     }),
   );
+  // Bound invalid-token traffic before verification; the tighter limit below
+  // is per signed-in account so people sharing an IP do not throttle each other.
+  app.use("/api", rateLimit({
+    windowMs: 60000, limit: 1200, standardHeaders: "draft-8", legacyHeaders: false,
+    message: { error: "Too many requests. Please wait a moment" },
+  }));
   app.use("/api/auth", rateLimit({
     windowMs: 60000, limit: 240, standardHeaders: "draft-8", legacyHeaders: false,
     message: { error: "Too many requests. Please wait a moment" },
