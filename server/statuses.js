@@ -273,6 +273,7 @@ export class Statuses {
       "SELECT object_key FROM statuses WHERE id=$1",
       [id],
     );
+    if (!row) fail(404, "Status media not found");
     return {
       bytes: await this.files.get(row.object_key),
       mimeType: item.media.mimeType,
