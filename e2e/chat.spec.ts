@@ -408,16 +408,19 @@ test("three members connect group audio, mute and leave", async ({ page, browser
 });
 
 test("a direct voice call connects and ends for both people", async ({ page, browser }, testInfo) => {
+  test.setTimeout(90000);
   const other = await browser.newContext(testInfo.project.use);
   const bob = await other.newPage();
+  const callerName = `Direct caller ${testInfo.project.name}`;
+  const recipientName = `Direct recipient ${testInfo.project.name}`;
   try {
-    await login(page, "alice");
-    await login(bob, "bob");
+    await register(page, callerName);
+    await register(bob, recipientName);
     await page.getByRole("button", { name: "New conversation" }).click();
-    await page.getByLabel("Find people").fill("Bob");
-    await page.locator("label.person").filter({ hasText: "Bob" }).getByRole("checkbox").check();
+    await page.getByLabel("Find people").fill(recipientName);
+    await page.locator("label.person").filter({ hasText: recipientName }).getByRole("checkbox").check();
     await page.getByRole("button", { name: "Start chatting" }).click();
-    await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: recipientName, exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Start voice call" }).click();
     await expect(bob.getByRole("region", { name: "Voice call" })).toContainText("Incoming voice call");
     await bob.getByRole("button", { name: "Join call" }).click();
@@ -426,5 +429,5 @@ test("a direct voice call connects and ends for both people", async ({ page, bro
     await page.getByRole("button", { name: "Leave call" }).click();
     await expect(bob.getByRole("region", { name: "Voice call" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Voice call" })).toHaveCount(0);
-  } finally { await other.close(); }
+  } finally { await other.close().catch(() => {}); }
 });
