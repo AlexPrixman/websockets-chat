@@ -7,6 +7,17 @@ async function login(page: Page, user: string) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Messages." })).toBeVisible();
 }
+async function register(page: Page, name: string) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "New here? Create an account" }).click();
+  await page.getByLabel("Your name").fill(name);
+  await page
+    .getByLabel("Email address")
+    .fill(`${name.replaceAll(" ", "-").toLowerCase()}-${Date.now()}@example.test`);
+  await page.getByLabel("Password", { exact: true }).fill("TestPassword123!");
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Messages." })).toBeVisible();
+}
 test("sign-up, profile update, session restoration and logout", async ({
   page,
 }) => {
@@ -146,16 +157,6 @@ test("emoji picker inserts at the cursor and delivers saved messages", async ({ 
   const bob = await other.newPage();
   const senderName = `Emoji sender ${testInfo.project.name}`;
   const recipientName = `Emoji recipient ${testInfo.project.name}`;
-  // Independent identities keep repeated browser flows from sharing account limits.
-  async function register(target: Page, name: string) {
-    await target.goto("/");
-    await target.getByRole("button", { name: "New here? Create an account" }).click();
-    await target.getByLabel("Your name").fill(name);
-    await target.getByLabel("Email address").fill(`${name.replaceAll(" ", "-")}-${Date.now()}@example.test`);
-    await target.getByLabel("Password", { exact: true }).fill("TestPassword123!");
-    await target.getByRole("button", { name: "Create account", exact: true }).click();
-    await expect(target.getByRole("heading", { name: "Messages." })).toBeVisible();
-  }
   try {
     await register(page, senderName);
     await register(bob, recipientName);
@@ -180,6 +181,84 @@ test("emoji picker inserts at the cursor and delivers saved messages", async ({ 
     await expect(page.getByLabel("Messages", { exact: true }).getByText(message, { exact: true })).toBeVisible();
     await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
   } finally { await other.close(); }
+});
+test("photo and video statuses carry decorations, contact tags, views and deletion", async ({ page, browser }, testInfo) => {
+  const other = await browser.newContext(testInfo.project.use);
+  const viewer = await other.newPage();
+  const ownerName = `Status owner ${testInfo.project.name}`;
+  const viewerName = `Status viewer ${testInfo.project.name}`;
+  try {
+    await register(page, ownerName);
+    await register(viewer, viewerName);
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await page.getByLabel("Find people").fill(viewerName);
+    await page.locator("label.person").filter({ hasText: viewerName }).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    if (testInfo.project.name === "mobile")
+      await page.getByRole("button", { name: "Back to conversations" }).click();
+
+    await page.getByRole("button", { name: "Add status" }).last().click();
+    const composer = page.getByRole("dialog", { name: "Create status" });
+    await composer.getByLabel("Status text").fill("Coffee, code, and good company");
+    await composer.getByLabel("Status photo or video").setInputFiles({
+      name: "status.png",
+      mimeType: "image/png",
+      buffer: await sharp({
+        create: { width: 360, height: 640, channels: 3, background: "#527c68" },
+      })
+        .png()
+        .toBuffer(),
+    });
+    await composer.getByRole("button", { name: "Add ✨ sticker" }).click();
+    await composer.getByRole("button", { name: "Add time" }).click();
+    await composer
+      .locator("label")
+      .filter({ hasText: viewerName })
+      .getByRole("checkbox")
+      .check();
+    await expect(composer.getByLabel("Tagged contacts").getByText(/^@user_/)).toBeVisible();
+    await page.screenshot({ path: `test-results/status-composer-${testInfo.project.name}.png`, fullPage: true });
+    await composer.getByRole("button", { name: "Share status" }).click();
+    await expect(composer).toBeHidden();
+
+    await page.getByRole("button", { name: "Add status" }).click();
+    const videoComposer = page.getByRole("dialog", { name: "Create status" });
+    await videoComposer.getByLabel("Status text").fill("A tiny video moment");
+    await videoComposer.getByLabel("Status photo or video").setInputFiles({
+      name: "status.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom"), Buffer.alloc(64)]),
+    });
+    await videoComposer.getByRole("button", { name: "Share status" }).click();
+    await expect(videoComposer).toBeHidden();
+
+    const statusButton = viewer.getByRole("button", { name: `View ${ownerName}'s status` });
+    await expect(statusButton).toBeVisible();
+    await statusButton.click();
+    const statusViewer = viewer.getByRole("dialog", { name: `${ownerName}'s status` });
+    await expect(statusViewer.getByText("Coffee, code, and good company")).toBeVisible();
+    await expect(statusViewer.getByText("Tagged you", { exact: false })).toBeVisible();
+    await expect(statusViewer.getByRole("img", { name: `${ownerName}'s status photo` })).toBeVisible();
+    await statusViewer.getByRole("button", { name: "Next status" }).click();
+    await expect(statusViewer.getByText("A tiny video moment")).toBeVisible();
+    await expect(statusViewer.getByLabel(`${ownerName}'s status video`)).toHaveAttribute("src", /^blob:/);
+    await viewer.screenshot({ path: `test-results/status-viewer-${testInfo.project.name}.png`, fullPage: true });
+    await statusViewer.getByRole("button", { name: "Close status viewer" }).click();
+
+    await page.getByRole("button", { name: "View your status" }).click();
+    const ownerViewer = page.getByRole("dialog", { name: `${ownerName}'s status` });
+    await expect(ownerViewer.getByText("1 view")).toBeVisible();
+    for (let remaining = 2; remaining > 0; remaining--) {
+      page.once("dialog", (dialog) => void dialog.accept());
+      await ownerViewer.getByRole("button", { name: "Delete status" }).click();
+      if (remaining > 1) await expect(ownerViewer).toBeVisible();
+    }
+    await expect(ownerViewer).toBeHidden();
+    await expect(statusButton).toHaveCount(0);
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
+  } finally {
+    await other.close();
+  }
 });
 test("group conversation and block controls", async ({ page }, testInfo) => {
   await login(page, "eve");
@@ -329,16 +408,19 @@ test("three members connect group audio, mute and leave", async ({ page, browser
 });
 
 test("a direct voice call connects and ends for both people", async ({ page, browser }, testInfo) => {
+  test.setTimeout(90000);
   const other = await browser.newContext(testInfo.project.use);
   const bob = await other.newPage();
+  const callerName = `Direct caller ${testInfo.project.name}`;
+  const recipientName = `Direct recipient ${testInfo.project.name}`;
   try {
-    await login(page, "alice");
-    await login(bob, "bob");
+    await register(page, callerName);
+    await register(bob, recipientName);
     await page.getByRole("button", { name: "New conversation" }).click();
-    await page.getByLabel("Find people").fill("Bob");
-    await page.locator("label.person").filter({ hasText: "Bob" }).getByRole("checkbox").check();
+    await page.getByLabel("Find people").fill(recipientName);
+    await page.locator("label.person").filter({ hasText: recipientName }).getByRole("checkbox").check();
     await page.getByRole("button", { name: "Start chatting" }).click();
-    await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: recipientName, exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Start voice call" }).click();
     await expect(bob.getByRole("region", { name: "Voice call" })).toContainText("Incoming voice call");
     await bob.getByRole("button", { name: "Join call" }).click();
@@ -347,5 +429,5 @@ test("a direct voice call connects and ends for both people", async ({ page, bro
     await page.getByRole("button", { name: "Leave call" }).click();
     await expect(bob.getByRole("region", { name: "Voice call" })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Voice call" })).toHaveCount(0);
-  } finally { await other.close(); }
+  } finally { await other.close().catch(() => {}); }
 });

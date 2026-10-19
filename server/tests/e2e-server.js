@@ -96,6 +96,7 @@ const runtime = createApp(
     files: {
       put: async (k, b) => photos.set(k, b),
       get: async (k) => photos.get(k),
+      remove: async (k) => photos.delete(k),
     },
   },
 );

@@ -27,6 +27,32 @@ export type Message = {
   photo: null | { id: string; width: number; height: number };
   voice: null | { id: string; durationMs: number; mimeType: string; bytes: number };
 };
+export type StatusOverlay = {
+  type: "sticker" | "time";
+  value: string;
+  x: number;
+  y: number;
+};
+export type StatusUpdate = {
+  id: string;
+  owner: Pick<Person, "id" | "name" | "handle">;
+  text: string;
+  background: "sage" | "ocean" | "sunset" | "dusk" | "charcoal";
+  overlays: StatusOverlay[];
+  mentions: Pick<Person, "id" | "name" | "handle">[];
+  tagged: boolean;
+  viewedAt: string | null;
+  viewCount?: number;
+  createdAt: string;
+  expiresAt: string;
+  media: null | {
+    type: "image" | "video";
+    mimeType: "image/jpeg" | "video/mp4" | "video/webm";
+    width: number | null;
+    height: number | null;
+    bytes: number;
+  };
+};
 export const titleOf = (c: Conversation, me: string) =>
   c.kind === "group"
     ? c.title

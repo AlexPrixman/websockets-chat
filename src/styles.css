@@ -958,6 +958,419 @@ dialog p {
 .privacy-person button {
   color: #9b6247;
 }
+.status-tray {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: 0 20px 17px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #edf0e9;
+}
+.status-person {
+  position: relative;
+  flex: 0 0 58px;
+  min-width: 0;
+  text-align: center;
+}
+.status-person > button:not(.status-add) {
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+.status-person > button > span:last-of-type {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-person small {
+  display: block;
+  width: 62px;
+  margin-top: -3px;
+  color: #a6654a;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.status-ring {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  padding: 3px;
+  border-radius: 20px;
+}
+.status-ring.unseen {
+  background: linear-gradient(145deg, #4f8c67, #d1a159);
+}
+.status-ring.seen {
+  background: #cbd4c8;
+}
+.status-ring.empty {
+  border: 1px dashed #aebaa9;
+}
+.status-avatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 2px solid #fcfdfb;
+  border-radius: 17px;
+  background: #e5ecdf;
+  color: #4f674b;
+  font-size: 12px;
+  font-weight: 800;
+}
+.status-add {
+  position: absolute;
+  top: 38px;
+  right: 1px;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fcfdfb;
+  border-radius: 50%;
+  background: #315e49;
+  color: #fff;
+}
+.status-composer-dialog {
+  width: min(940px, calc(100vw - 30px));
+  padding: 24px;
+}
+.status-composer-dialog > header,
+.status-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.status-composer-dialog > header h2 {
+  margin-top: 5px;
+}
+.status-compose-layout {
+  display: grid;
+  grid-template-columns: minmax(245px, 310px) minmax(0, 1fr);
+  align-items: start;
+  gap: 26px;
+}
+.status-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 62dvh;
+  overflow: hidden;
+  border-radius: 22px;
+  box-shadow: inset 0 0 0 1px #ffffff25, 0 15px 35px #23392d20;
+  color: #fff;
+  isolation: isolate;
+}
+.status-bg-sage {
+  background: linear-gradient(145deg, #789875, #284d3d);
+}
+.status-bg-ocean {
+  background: linear-gradient(145deg, #4f94a4, #233e64);
+}
+.status-bg-sunset {
+  background: linear-gradient(145deg, #db9a63, #9e4f62);
+}
+.status-bg-dusk {
+  background: linear-gradient(145deg, #8b719d, #3b335c);
+}
+.status-bg-charcoal {
+  background: linear-gradient(145deg, #52605c, #17221f);
+}
+.status-media {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #16211c;
+}
+.status-media-note {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  text-align: center;
+  font-size: 12px;
+}
+.status-main-text {
+  position: absolute;
+  z-index: 1;
+  left: 10%;
+  right: 10%;
+  top: 50%;
+  margin: 0;
+  transform: translateY(-50%);
+  color: #fff;
+  font: 800 clamp(22px, 4vw, 36px) / 1.2 Manrope, sans-serif;
+  text-align: center;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-shadow: 0 2px 15px #0009;
+}
+.status-overlay {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 3px 4px #0007);
+}
+.status-overlay.sticker {
+  font-size: clamp(34px, 8vw, 54px);
+}
+.status-overlay.time {
+  padding: 6px 11px;
+  border: 1px solid #ffffff55;
+  border-radius: 9px;
+  background: #1118;
+  color: #fff;
+  font: 800 18px Manrope, sans-serif;
+  white-space: nowrap;
+}
+.status-tags {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  right: 12px;
+  bottom: 13px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.status-tags span {
+  max-width: 100%;
+  padding: 5px 8px;
+  overflow: hidden;
+  border: 1px solid #ffffff42;
+  border-radius: 12px;
+  background: #10251ebd;
+  color: #fff;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+.status-tools {
+  min-width: 0;
+}
+.status-tools label {
+  font-size: 12px;
+}
+.status-tools textarea {
+  min-height: 84px;
+}
+.status-tool-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.status-tool-row button,
+.status-media-picker {
+  min-height: 39px;
+  margin: 0;
+  padding: 9px 11px;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  border-radius: 9px;
+  background: #edf2e9;
+  color: #405a48;
+  font-size: 11px;
+  cursor: pointer;
+}
+.status-tool-row .selected {
+  background: #315e49;
+  color: #fff;
+}
+.status-media-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.status-tools fieldset {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+.status-tools legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 9px;
+  color: #536259;
+  font-size: 11px;
+  font-weight: 700;
+}
+.status-backgrounds > div,
+.status-sticker-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.status-backgrounds button {
+  width: 31px;
+  height: 31px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #cbd5c6;
+}
+.status-backgrounds button.selected {
+  box-shadow: 0 0 0 3px #315e49;
+}
+.status-sticker-picker button {
+  min-width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #f0f3ed;
+  font-size: 21px;
+}
+.status-sticker-picker .status-clear-stickers {
+  padding: 0 10px;
+  font-size: 10px;
+}
+.status-contact-picker {
+  min-width: 0;
+}
+.status-contact-picker > p {
+  color: #7d887f;
+  font-size: 11px;
+}
+.status-contact-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.status-contact-list label {
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 1px 8px;
+  border: 1px solid #e2e8dd;
+  border-radius: 9px;
+  font-size: 11px;
+}
+.status-contact-list input {
+  grid-row: span 2;
+  width: 17px;
+  height: 17px;
+  margin: auto 0;
+  accent-color: #315e49;
+}
+.status-contact-list span,
+.status-contact-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-contact-list small {
+  font-size: 9px;
+}
+.status-compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 20px;
+}
+.status-compose-actions small {
+  margin-right: auto;
+  font-size: 10px;
+}
+.status-viewer-dialog {
+  width: min(440px, calc(100vw - 24px));
+  padding: 14px;
+  overflow: hidden;
+  border-color: #30443a;
+  background: #17251f;
+  color: #fff;
+}
+.status-viewer-dialog .status-canvas {
+  max-height: min(68dvh, 680px);
+  margin: 0 auto;
+}
+.status-progress {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.status-progress button {
+  height: 3px;
+  flex: 1;
+  border-radius: 5px;
+  background: #ffffff3d;
+}
+.status-progress button.active {
+  background: #fff;
+}
+.status-viewer-head {
+  margin-bottom: 12px;
+}
+.status-viewer-head .status-avatar {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 14px;
+}
+.status-viewer-head > div {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.status-viewer-head strong {
+  font-size: 12px;
+}
+.status-viewer-head small {
+  color: #afbeb5;
+  font-size: 9px;
+}
+.status-viewer-head .icon {
+  color: #fff;
+}
+.status-viewer-head .icon:hover {
+  background: #ffffff16;
+}
+.status-viewer-footer {
+  display: grid;
+  grid-template-columns: 42px 1fr 42px;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+}
+.status-viewer-footer button {
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #ffffff13;
+  color: #fff;
+}
+.status-viewer-footer span {
+  overflow: hidden;
+  color: #b9c8bf;
+  font-size: 10px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -993,6 +1406,10 @@ dialog p {
   }
   .search {
     margin: 0 16px;
+  }
+  .status-tray {
+    padding-left: 14px;
+    padding-right: 14px;
   }
   .conversation {
     gap: 9px;
@@ -1135,5 +1552,47 @@ dialog p {
   }
   .people-list {
     max-height: 200px;
+  }
+  .status-composer-dialog {
+    width: calc(100vw - 14px);
+    max-height: calc(100dvh - 14px);
+    padding: 17px;
+  }
+  .status-compose-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .status-compose-layout .status-canvas {
+    width: min(220px, 68vw);
+    max-height: 40dvh;
+    margin: 0 auto;
+  }
+  .status-tools {
+    width: 100%;
+  }
+  .status-contact-list {
+    grid-template-columns: 1fr;
+  }
+  .status-compose-actions {
+    position: sticky;
+    bottom: -17px;
+    margin: 10px -17px -17px;
+    padding: 12px 17px max(12px, env(safe-area-inset-bottom));
+    background: #fdfefa;
+  }
+  .status-compose-actions small {
+    display: none;
+  }
+  .status-compose-actions .primary {
+    width: 100%;
+  }
+  .status-viewer-dialog {
+    width: calc(100vw - 10px);
+    max-height: calc(100dvh - 10px);
+    padding: 11px;
+  }
+  .status-viewer-dialog .status-canvas {
+    max-height: calc(100dvh - 155px);
   }
 }

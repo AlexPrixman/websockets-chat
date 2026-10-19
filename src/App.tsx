@@ -28,6 +28,7 @@ import { api, auth, json, token } from "./api";
 import { RecordingControls, VoiceNote, useVoiceRecorder, type Recording } from "./voice-note";
 import { CallDock, useVoiceCalls } from "./voice-call";
 import { EmojiPicker, insertEmoji } from "./emoji-picker";
+import { StatusTray } from "./statuses";
 import {
   mergeMessages,
   titleOf,
@@ -690,6 +691,7 @@ function ChatApp({
             <Plus />
           </button>
         </header>
+        <StatusTray me={me} socket={liveSocket} onError={setError} />
         <div className="search">
           <Search size={18} />
           <input
