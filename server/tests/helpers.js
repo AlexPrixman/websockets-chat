@@ -49,6 +49,7 @@ export async function fixture() {
     files: {
       put: async (k, b) => objects.set(k, b),
       get: async (k) => objects.get(k),
+      remove: async (k) => objects.delete(k),
     },
   });
   return {

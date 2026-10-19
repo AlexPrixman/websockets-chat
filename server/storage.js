@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
@@ -32,14 +33,16 @@ export function storage(config) {
       (
         await s3.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }))
       ).Body.transformToByteArray(),
+    remove: async (key) =>
+      s3.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })),
   };
 }
-const usageQuery = `SELECT coalesce(sum(bytes),0)::bigint AS total,coalesce(sum(bytes) FILTER(WHERE owner_id=$1 AND created_at>now()-interval '1 day'),0)::bigint AS daily FROM (SELECT owner_id,bytes,created_at FROM photos WHERE status IN ('uploading','ready') UNION ALL SELECT owner_id,bytes,created_at FROM voice_notes WHERE status IN ('uploading','ready')) objects`;
-async function reserve(db, user, bytes) {
+const usageQuery = `SELECT coalesce(sum(bytes),0)::bigint AS total,coalesce(sum(bytes) FILTER(WHERE owner_id=$1 AND created_at>now()-interval '1 day'),0)::bigint AS daily FROM (SELECT owner_id,bytes,created_at FROM photos WHERE status IN ('uploading','ready') UNION ALL SELECT owner_id,bytes,created_at FROM voice_notes WHERE status IN ('uploading','ready') UNION ALL SELECT owner_id,bytes,created_at FROM statuses WHERE upload_status IN ('uploading','ready') AND expires_at>now()) objects`;
+export async function reserve(db, user, bytes) {
   const used = await db.one(usageQuery, [user]);
   if (
     Number(used.total) + bytes > 200 * 1024 * 1024 ||
-    Number(used.daily) + bytes > 25 * 1024 * 1024
+    Number(used.daily) + bytes > 75 * 1024 * 1024
   )
     fail(429, "Media storage limit reached. Try again later");
 }

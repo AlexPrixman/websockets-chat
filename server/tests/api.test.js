@@ -5,7 +5,7 @@ import request from "supertest";
 import sharp from "sharp";
 import { io } from "socket.io-client";
 import { fixture } from "./helpers.js";
-let f, api, id, messageId, photoId;
+let f, api, id, messageId, photoId, textStatusId;
 const as = (method, path, user = "alice") =>
   api[method]("/api" + path).set("Authorization", "Bearer " + user);
 before(async () => {
@@ -116,6 +116,92 @@ test("photo normalization, access control and ownership", async () => {
     .expect("Content-Type", /image\/jpeg/);
   await as("get", "/photos/" + photoId, "eve").expect(404);
 });
+test("24-hour statuses support private media, overlays, tags, views and expiry", async () => {
+  const image = await sharp({
+    create: { width: 36, height: 64, channels: 3, background: "#6c8f66" },
+  })
+    .png()
+    .toBuffer();
+  await as("post", "/statuses")
+    .field("text", "No unauthorized tags")
+    .field("overlays", "[]")
+    .field("taggedIds", JSON.stringify(["eve"]))
+    .expect(400);
+  await as("post", "/statuses")
+    .field("text", "bad video")
+    .field("overlays", "[]")
+    .field("taggedIds", "[]")
+    .attach("media", Buffer.from("not a video"), {
+      filename: "bad.mp4",
+      contentType: "video/mp4",
+    })
+    .expect(400);
+  const created = await as("post", "/statuses")
+    .field("text", "A day in the circle")
+    .field("background", "ocean")
+    .field(
+      "overlays",
+      JSON.stringify([
+        { type: "time", value: "9:41 AM", x: 50, y: 11 },
+        { type: "sticker", value: "✨", x: 80, y: 28 },
+      ]),
+    )
+    .field("taggedIds", JSON.stringify(["bob"]))
+    .attach("media", image, { filename: "status.png", contentType: "image/png" })
+    .expect(201);
+  assert.equal(created.body.media.type, "image");
+  assert.equal(created.body.media.mimeType, "image/jpeg");
+  assert.equal(created.body.background, "ocean");
+  assert.equal(created.body.overlays.length, 2);
+  assert.equal(created.body.mentions[0].id, "bob");
+  const statusId = created.body.id;
+  const forBob = await as("get", "/statuses", "bob").expect(200);
+  const visible = forBob.body.find((status) => status.id === statusId);
+  assert.equal(visible.tagged, true);
+  assert.equal(visible.viewedAt, null);
+  assert.ok(!(await as("get", "/statuses", "eve")).body.some((status) => status.id === statusId));
+  await as("get", `/statuses/${statusId}/media`, "bob")
+    .expect(200)
+    .expect("Content-Type", /image\/jpeg/);
+  await as("get", `/statuses/${statusId}/media`, "eve").expect(404);
+  await as("post", `/statuses/${statusId}/view`, "eve").expect(404);
+  await as("post", `/statuses/${statusId}/view`, "bob").expect(200);
+  const forOwner = await as("get", "/statuses").expect(200);
+  assert.equal(forOwner.body.find((status) => status.id === statusId).viewCount, 1);
+  await as("delete", `/statuses/${statusId}`, "bob").expect(404);
+  await f.db.query("UPDATE statuses SET expires_at=now()-interval '1 second' WHERE id=$1", [statusId]);
+  assert.ok(!(await as("get", "/statuses", "bob")).body.some((status) => status.id === statusId));
+  await as("get", `/statuses/${statusId}/media`, "bob").expect(404);
+
+  const video = Buffer.concat([
+    Buffer.alloc(4),
+    Buffer.from("ftyp"),
+    Buffer.from("isom"),
+    Buffer.alloc(64),
+  ]);
+  const uploadedVideo = await as("post", "/statuses")
+    .field("text", "Tiny private video")
+    .field("overlays", JSON.stringify([{ type: "sticker", value: "🔥", x: 20, y: 24 }]))
+    .field("taggedIds", "[]")
+    .attach("media", video, { filename: "clip.mp4", contentType: "video/mp4" })
+    .expect(201);
+  assert.equal(uploadedVideo.body.media.type, "video");
+  await as("get", `/statuses/${uploadedVideo.body.id}/media`, "bob")
+    .expect(200)
+    .expect("Content-Type", /video\/mp4/);
+  assert.ok([...f.objects.keys()].some((key) => key.includes(uploadedVideo.body.id)));
+  await as("delete", `/statuses/${uploadedVideo.body.id}`).expect(200);
+  assert.ok(![...f.objects.keys()].some((key) => key.includes(uploadedVideo.body.id)));
+
+  const textStatus = await as("post", "/statuses")
+    .field("text", "Text-only update")
+    .field("background", "sunset")
+    .field("overlays", "[]")
+    .field("taggedIds", "[]")
+    .expect(201);
+  textStatusId = textStatus.body.id;
+  assert.equal(textStatus.body.media, null);
+});
 test("only message owner may remove it and deleted photos become inaccessible", async () => {
   await as("delete", "/messages/" + messageId, "bob").expect(403);
   await as("delete", "/messages/" + messageId).expect(200);
@@ -128,6 +214,7 @@ test("only message owner may remove it and deleted photos become inaccessible", 
 });
 test("blocking prevents messages and discovery; unblocking restores ability", async () => {
   await as("put", "/blocks/bob").expect(200);
+  assert.ok(!(await as("get", "/statuses", "bob")).body.some((status) => status.id === textStatusId));
   await as("post", `/conversations/${id}/messages`, "bob")
     .send({ clientId: randomUUID(), text: "Blocked" })
     .expect(403);
@@ -137,6 +224,7 @@ test("blocking prevents messages and discovery; unblocking restores ability", as
     0,
   );
   await as("delete", "/blocks/bob").expect(200);
+  assert.ok((await as("get", "/statuses", "bob")).body.some((status) => status.id === textStatusId));
   await as("post", `/conversations/${id}/messages`, "bob")
     .send({ clientId: randomUUID(), text: "Unblocked" })
     .expect(201);
@@ -317,7 +405,7 @@ test("group call signaling stays inside membership and ends on blocking", async 
 test("real-time delivery, typing, nonmember isolation and logout revocation", async () => {
   await new Promise((resolve) => f.server.listen(0, "127.0.0.1", resolve));
   const url = "http://127.0.0.1:" + f.server.address().port;
-  const sockets = ["alice", "bob", "eve"].map((token) =>
+  const sockets = ["alice", "bob", "moderator"].map((token) =>
     io(url, { auth: { token }, transports: ["websocket"], autoConnect: false }),
   );
   try {
@@ -333,8 +421,12 @@ test("real-time delivery, typing, nonmember isolation and logout revocation", as
     );
     const [a, b, e] = sockets;
     let leaked = false;
+    let leakedStatus = false;
     e.on("message:new", () => {
       leaked = true;
+    });
+    e.on("statuses:changed", () => {
+      leakedStatus = true;
     });
     const received = new Promise((resolve) => b.once("message:new", resolve));
     const response = await a
@@ -346,6 +438,16 @@ test("real-time delivery, typing, nonmember isolation and logout revocation", as
       });
     assert.equal(response.ok, true);
     assert.equal((await received).text, "Realtime 🥳✨");
+    const statusChanged = new Promise((resolve) => b.once("statuses:changed", resolve));
+    const socketStatus = await as("post", "/statuses")
+      .field("text", "Live status")
+      .field("overlays", "[]")
+      .field("taggedIds", "[]")
+      .expect(201);
+    assert.equal((await statusChanged).ownerId, "alice");
+    assert.ok((await as("get", "/statuses", "bob")).body.some((status) => status.id === socketStatus.body.id));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(leakedStatus, false);
     const emojiHistory = await as("get", `/conversations/${id}/messages`, "bob").expect(200);
     assert.ok(emojiHistory.body.items.some((m) => m.text === "Realtime 🥳✨"));
     const typing = new Promise((resolve) => b.once("typing", resolve));

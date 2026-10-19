@@ -10,6 +10,7 @@ import { authentication, managedVerifier } from "./auth.js";
 import { authProxy } from "./auth-proxy.js";
 import { Chat, profile } from "./chat.js";
 import { Photos, VoiceNotes, storage } from "./storage.js";
+import { Statuses } from "./statuses.js";
 import { VoiceCalls } from "./calls.js";
 import { fail, HttpError, text, uuid } from "./validation.js";
 
@@ -34,6 +35,7 @@ export function createApp(
     fileStore = files || storage(config),
     photos = new Photos(db, chat, fileStore),
     voiceNotes = new VoiceNotes(db, chat, fileStore),
+    statuses = new Statuses(db, fileStore),
     calls = new VoiceCalls(chat, io);
   const auth = authentication(
     db,
@@ -88,6 +90,7 @@ export function createApp(
       authUrl: config.authUrl,
       maxPhotoBytes: 5 * 1024 * 1024,
       maxVoiceBytes: 5 * 1024 * 1024,
+      maxStatusBytes: 25 * 1024 * 1024,
       moderationEnabled: !!config.moderatorId,
     }),
   );
@@ -129,6 +132,54 @@ export function createApp(
   app.get("/api/conversations", async (req, res) =>
     res.json(await chat.conversations(req.actor.id)),
   );
+  app.get("/api/statuses", async (req, res) =>
+    res.json(await statuses.list(req.actor.id)),
+  );
+  app.get("/api/statuses/contacts", async (req, res) =>
+    res.json(await statuses.contacts(req.actor.id)),
+  );
+  app.post(
+    "/api/statuses",
+    rateLimit({
+      windowMs: 60000,
+      limit: 12,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+    }),
+    multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 5 },
+    }).single("media"),
+    async (req, res) => {
+      const item = await statuses.create(req.actor.id, req.body, req.file);
+      await statusChanged(req.actor.id);
+      res.status(201).json(item);
+    },
+  );
+  app.get("/api/statuses/:id/media", async (req, res) => {
+    const media = await statuses.download(req.params.id, req.actor.id);
+    res
+      .set({
+        "Content-Type": media.mimeType,
+        "Content-Length": String(media.bytes.length),
+        "Cache-Control": "private,no-store",
+      })
+      .send(Buffer.from(media.bytes));
+  });
+  app.post("/api/statuses/:id/view", async (req, res) => {
+    const item = await statuses.get(req.params.id, req.actor.id);
+    const result = await statuses.view(req.params.id, req.actor.id);
+    if (item.owner.id !== req.actor.id)
+      io.to("user:" + item.owner.id).emit("statuses:changed", {
+        ownerId: item.owner.id,
+      });
+    res.json(result);
+  });
+  app.delete("/api/statuses/:id", async (req, res) => {
+    const result = await statuses.remove(req.params.id, req.actor.id);
+    await statusChanged(req.actor.id);
+    res.json(result);
+  });
   app.get("/api/call-config", (req, res) => res.json({ iceServers: config.iceServers || [{ urls: ["stun:stun.l.google.com:19302"] }] }));
   app.post("/api/conversations", async (req, res) => {
     const c = await chat.create(req.actor.id, req.body);
@@ -232,12 +283,16 @@ export function createApp(
     await calls.block(req.actor.id, req.params.id);
     io.to("user:" + req.actor.id).emit("conversations:changed");
     io.to("user:" + req.params.id).emit("conversations:changed");
+    io.to("user:" + req.actor.id).emit("statuses:changed");
+    io.to("user:" + req.params.id).emit("statuses:changed");
     res.json(result);
   });
   app.delete("/api/blocks/:id", async (req, res) => {
     res.json(await chat.unblock(req.actor.id, req.params.id));
     io.to("user:" + req.actor.id).emit("conversations:changed");
     io.to("user:" + req.params.id).emit("conversations:changed");
+    io.to("user:" + req.actor.id).emit("statuses:changed");
+    io.to("user:" + req.params.id).emit("statuses:changed");
   });
   app.post("/api/reports", async (req, res) =>
     res
@@ -280,7 +335,12 @@ export function createApp(
         .status(409)
         .json({ error: "That handle or attachment is already in use" });
     if (e instanceof multer.MulterError)
-      return res.status(400).json({ error: "Choose one attachment up to 5 MB" });
+      return res.status(400).json({
+        error:
+          e.field === "media"
+            ? "Choose one status photo up to 5 MB or video up to 25 MB"
+            : "Choose one attachment up to 5 MB",
+      });
     if (e.type === "entity.parse.failed")
       return res.status(400).json({ error: "Invalid JSON" });
     if (e.type === "entity.too.large")
@@ -306,6 +366,10 @@ export function createApp(
   }
   async function changed(id) {
     await broadcast(id, "conversations:changed");
+  }
+  async function statusChanged(owner) {
+    for (const user of await statuses.audience(owner))
+      io.to("user:" + user).emit("statuses:changed", { ownerId: owner });
   }
   async function presence(id) {
     const peers = await db.all(
@@ -404,6 +468,7 @@ export function createApp(
     chat,
     photos,
     voiceNotes,
+    statuses,
     calls,
     auth,
     close: () =>
