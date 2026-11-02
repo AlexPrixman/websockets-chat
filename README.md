@@ -23,6 +23,8 @@ This is a portfolio demo, not a replacement for a production messaging platform.
 
 ## Development
 
+Security overrides keep the managed-auth SDK's pinned Better Auth/Zod dependencies and its optional email-rendering tree on patched releases. Review these overrides when upgrading the SDK; keep the production dependency audit enabled.
+
 Use Node 24 and PostgreSQL 18. Run `npm ci`, copy `.env.example` to `.env`, and configure your own Neon authentication and private bucket credentials. Register your application origin in Neon Auth's trusted domains. The app proxies supported authentication routes through `/api/auth`, so browser sessions use first-party cookies. Then run `npm run dev` and open http://localhost:5173.
 
 The server applies the version-controlled, additive schema in `server/schema.js` at startup. Never point test tools at the live database. Back up your database before future schema changes.
