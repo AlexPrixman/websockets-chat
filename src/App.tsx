@@ -23,12 +23,15 @@ import {
   CheckCheck,
   Mic,
   Phone,
+  ArrowUpRight,
+  Sparkles,
 } from "lucide-react";
 import { api, auth, json, token } from "./api";
 import { RecordingControls, VoiceNote, useVoiceRecorder, type Recording } from "./voice-note";
 import { CallDock, useVoiceCalls } from "./voice-call";
 import { EmojiPicker, insertEmoji } from "./emoji-picker";
 import { StatusTray } from "./statuses";
+import { ThemeSettings, ThemeSwitch } from "./theme";
 import {
   mergeMessages,
   titleOf,
@@ -40,8 +43,9 @@ import {
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please retry.";
 function Avatar({ name, group = false }: { name: string; group?: boolean }) {
+  const tone = [...name].reduce((sum, letter) => sum + letter.charCodeAt(0), 0) % 4;
   return (
-    <span className={"avatar " + (group ? "group" : "")}>
+    <span className={`avatar ${group ? "group" : `tone-${tone}`}`}>
       {group ? (
         <Users size={21} />
       ) : (
@@ -159,22 +163,25 @@ function Login({ done }: { done: () => void }) {
   return (
     <div className="login">
       <section className="intro">
-        <a className="brand" href="/">
-          <MessageCircle />
-          circlechat<span>●</span>
-        </a>
-        <div>
-          <span className="eyebrow">A LITTLE CLOSER, EVEN FROM AFAR</span>
+        <header className="intro-brand">
+          <a className="brand" href="/">
+            <span className="brand-symbol"><MessageCircle /></span>
+            circlechat<span className="brand-dot">.</span>
+          </a>
+          <ThemeSwitch />
+        </header>
+        <div className="intro-content">
+          <span className="intro-kicker"><span className="dot" /> YOUR PEOPLE. YOUR SPACE.</span>
           <h1>
-            Good conversations.
+            Less noise.
             <br />
-            <em>Great company.</em>
+            <em>More connection.</em>
           </h1>
           <p>
             A place for your people. Share the everyday, make a group, and keep
             the conversation going.
           </p>
-          <div className="sample">
+          <div className="sample" aria-hidden="true">
             <Avatar name="Jane Doe" />
             <div>
               <strong>
@@ -183,7 +190,11 @@ function Login({ done }: { done: () => void }) {
               <p>Same time, same place? ☕</p>
             </div>
           </div>
-          <div className="sample reply">Wouldn’t miss it. ✨</div>
+          <div className="sample reply" aria-hidden="true">Wouldn’t miss it. ✨ <CheckCheck size={16} /></div>
+          <div className="intro-features">
+            <span><MessageCircle size={14} /> Real conversations</span>
+            <span><Sparkles size={14} /> Everyday moments</span>
+          </div>
         </div>
         <footer>
           <ShieldCheck size={18} /> Member-only chats · Private media access
@@ -272,6 +283,7 @@ function Login({ done }: { done: () => void }) {
                     : mode === "verify"
                       ? "Verify email"
                       : "Reset password"}
+              {!busy && <ArrowUpRight size={19} aria-hidden="true" />}
             </button>
           </form>
           <div className="auth-actions">
@@ -658,18 +670,21 @@ function ChatApp({
         <button
           className="rail-active"
           aria-label="Conversations"
+          title="Conversations"
           onClick={() => setSelected("")}
         >
           <MessageCircle />
         </button>
         <div className="rail-bottom">
+          <ThemeSwitch />
           <button
             aria-label="Profile and settings"
+            title="Profile and settings"
             onClick={() => setModal("settings")}
           >
             <Settings />
           </button>
-          <button aria-label="Sign out" onClick={() => action(logout)}>
+          <button aria-label="Sign out" title="Sign out" onClick={() => action(logout)}>
             <LogOut />
           </button>
           <Avatar name={me.name} />
@@ -686,6 +701,7 @@ function ChatApp({
           <button
             className="new-button"
             aria-label="New conversation"
+            title="New conversation"
             onClick={() => setModal("new")}
           >
             <Plus />
@@ -715,6 +731,7 @@ function ChatApp({
                 className={
                   "conversation " + (selected === c.id ? "selected" : "")
                 }
+                aria-current={selected === c.id ? "true" : undefined}
                 onClick={() => setSelected(c.id)}
               >
                 <Avatar name={titleOf(c, me.id)} group={c.kind === "group"} />
@@ -771,7 +788,7 @@ function ChatApp({
                 name={titleOf(current, me.id)}
                 group={current.kind === "group"}
               />
-              <div>
+              <div className="chat-heading">
                 <h2>{titleOf(current, me.id)}</h2>
                 <p>
                   {current.blocked
@@ -794,7 +811,7 @@ function ChatApp({
                       void calls.join(current.id, calls.available.callId);
                     else void calls.start(current.id);
                   }}><Phone size={19} /></button>
-                <button className="icon" aria-label="Conversation members" onClick={() => setModal("settings")}><Users size={19} /></button>
+                <button className="icon" aria-label="Conversation members" title="Conversation members" onClick={() => setModal("settings")}><Users size={19} /></button>
                 <button className="icon" aria-label="Delete conversation for me" title="Delete conversation for me"
                   onClick={() => {
                     if (!confirm("Delete this chat from your history? Other members keep their messages. New messages can bring it back.")) return;
@@ -869,6 +886,7 @@ function ChatApp({
                         (m.senderId === me.id ? (
                           <button
                             aria-label="Delete message"
+                            title="Delete message"
                             onClick={() => {
                               if (confirm("Remove this message for everyone?"))
                                 void action(() =>
@@ -883,6 +901,7 @@ function ChatApp({
                         ) : (
                           <button
                             aria-label="Report message"
+                            title="Report message"
                             onClick={() => {
                               const reason = prompt(
                                 "Why are you reporting this message?",
@@ -1025,7 +1044,7 @@ function ChatApp({
             <h2>
               Your people.
               <br />
-              <em>One happy place.</em>
+              <em>Right here.</em>
             </h2>
             <p>
               From quick hellos to big plans.
@@ -1033,7 +1052,7 @@ function ChatApp({
               Pick a conversation or start something new.
             </p>
             <button className="primary" onClick={() => setModal("new")}>
-              <Plus size={18} /> Start a conversation
+              Start a conversation <ArrowUpRight size={18} />
             </button>
             <small>
               <ShieldCheck size={15} /> Only conversation members can access
@@ -1224,6 +1243,7 @@ function SettingsPanel({
   }
   return (
     <Modal title="Your profile & privacy" close={close}>
+      <ThemeSettings />
       <form
         onSubmit={async (e) => {
           e.preventDefault();
