@@ -16,11 +16,14 @@ A responsive, real-time messenger built with React, TypeScript, Express, Socket.
 - Direct and group voice calls with microphone mute, join/decline/leave controls, and authenticated Socket.IO signaling. Audio is peer-to-peer through WebRTC.
 - Delete a chat for yourself: it disappears from your list, and you cannot view or download its earlier messages or media. Other members retain their history. A new message brings the chat back with only the new history visible to you.
 - Editable profiles, case-insensitive unique handles, people search, blocking, own-message removal and message reporting. Moderator report review is available through the API.
+- Fresh mint-and-ink interface with coordinated light and dark themes. Appearance follows the device by default, updates when the system theme changes, and supports persistent Light/Dark/Device overrides in profile settings. Quick theme switches are available on sign-in and in the navigation rail; preferences sync across tabs on the same browser.
 - Desktop and mobile layouts, keyboard controls and focus-contained dialogs.
 
 This is a portfolio demo, not a replacement for a production messaging platform. Chats and statuses are access-controlled, **not end-to-end encrypted**. Do not share sensitive information. Group membership is fixed when a group is created. Blocking pauses sending, hides shared statuses and ends active calls in shared conversations but does not erase existing history. Removing a message hides its attached media from the application; it does not physically purge the storage object. The API makes statuses inaccessible at expiry and subsequent status activity removes expired database rows and private objects; a bucket lifecycle policy is still recommended as a fallback. Deleting a chat for yourself leaves the stored messages and media available to other members. No video calls, push notifications or account deletion workflow are included.
 
 ## Development
+
+Security overrides keep the managed-auth SDK's pinned Better Auth/Zod dependencies and its optional email-rendering tree on patched releases. Review these overrides when upgrading the SDK; keep the production dependency audit enabled.
 
 Use Node 24 and PostgreSQL 18. Run `npm ci`, copy `.env.example` to `.env`, and configure your own Neon authentication and private bucket credentials. Register your application origin in Neon Auth's trusted domains. The app proxies supported authentication routes through `/api/auth`, so browser sessions use first-party cookies. Then run `npm run dev` and open http://localhost:5173.
 
